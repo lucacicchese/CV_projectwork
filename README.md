@@ -10,15 +10,17 @@
 
 |  Feature   | DONE  | WIP |
 |-----|---|---|
-| Extract poses colmap |  | 🔁 |
-| Extract 3d points colmap |  | 🔁 |
+| Extract poses colmap | ✅ |  |
+| Extract 3d points colmap | ✅ |  |
 | Extract poses mast3r |  | 🔁 |
 | Extract 3d points mast3r |  | 🔁 |
 | Extract poses vggt |  | 🔁 |
 | Extract 3d points vggt |  | 🔁 |
-| Gaussian splatting  |  | 🔁 |
+| Gaussian splatting  |  | 🔁 sudo ninja install|
 
 ## Environment
+
+Install COLMAP <https://colmap.github.io/index.html>
 
 The testing environment has been managed with anaconda:
 `conda env create -f environment.yml`
