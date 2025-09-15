@@ -10,13 +10,15 @@
 
 |  Feature   | DONE  | WIP |
 |-----|---|---|
+| My indoor dataset |  | 🔁 |
+| My outdoor dataset |  | 🔁 |
 | Extract poses colmap | ✅ |  |
 | Extract 3d points colmap | ✅ |  |
 | Extract poses mast3r |  | 🔁 |
 | Extract 3d points mast3r |  | 🔁 |
 | Extract poses vggt |  | 🔁 |
 | Extract 3d points vggt |  | 🔁 |
-| Gaussian splatting  |  | 🔁 sudo ninja install|
+| Gaussian splatting  |  | 🔁 |
 
 ## Environment
 
