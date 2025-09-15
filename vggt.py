@@ -2,16 +2,74 @@ import numpy as np
 import cv2
 import os
 from pathlib import Path
+import json
 
-def extract_features_vggt(image_path, output_path):
+def extract_features_vggt(image_folder, output_folder):
     """
-    Extract features from an image using VGGT (Visual-Geometric Feature Extraction).
+    Extract features from a folder of images using VGGT (Visual-Geometric Feature Extraction).
+    
+    :param image_folder: Path to the folder containing images.
+    :param output_folder: Path to the folder where the extracted features will be saved.
+    :return: Tuple of (poses, points_3D) for all images.
+    """
+    
+    # Check if the image folder exists
+    if not os.path.exists(image_folder):
+        raise FileNotFoundError(f"Image folder not found: {image_folder}")
+    
+    # Create the output directory if it doesn't exist
+    Path(output_folder).mkdir(parents=True, exist_ok=True)
+    
+    poses_list = []
+    points_3d_list = []
+    
+    # Iterate over all images in the folder
+    for image_name in os.listdir(image_folder):
+        image_path = os.path.join(image_folder, image_name)
+        
+        # Skip non-image files
+        if not image_path.lower().endswith(('.png', '.jpg', '.jpeg')):
+            continue
+        
+        print(f"Processing image: {image_name}")
+        
+        # Extract features for each image
+        poses, points_3D = extract_features(image_path, output_folder)
+        
+        if poses is not None and points_3D is not None:
+            poses_list.append(poses)
+            points_3d_list.append(points_3D)
+            
+            # Save features to individual files
+            output_file = Path(output_folder) / f"{image_name}_features.npz"
+            save_features(output_file, poses, points_3D, None, None, None, None)  # save_features will need the correct arguments
+            
+    # Save aggregated poses and point cloud data for the entire dataset
+    aggregated_poses_path = Path(output_folder) / "camera_poses.json"
+    aggregated_point_cloud_path = Path(output_folder) / "point_cloud.json"
+    
+    with open(aggregated_poses_path, 'w') as f:
+        json.dump([pose['transformation_matrix'].tolist() for pose in poses_list], f)
+    
+    # Here we flatten the 3D points from all images
+    aggregated_points_3d = np.vstack(points_3d_list)
+    with open(aggregated_point_cloud_path, 'w') as f:
+        json.dump(aggregated_points_3d.tolist(), f)
+    
+    print(f"Aggregated camera poses saved to {aggregated_poses_path}")
+    print(f"Aggregated point cloud saved to {aggregated_point_cloud_path}")
+    
+    return poses_list, aggregated_points_3d
+
+
+def extract_features(image_path, output_path):
+    """
+    Extract features from a single image using VGGT.
     
     :param image_path: Path to the input image.
     :param output_path: Path to save the extracted features.
     :return: Tuple of (poses, points_3D)
     """
-    
     # Load the image
     if not os.path.exists(image_path):
         raise FileNotFoundError(f"Image not found: {image_path}")
@@ -37,7 +95,6 @@ def extract_features_vggt(image_path, output_path):
     points_2d = np.array([kp.pt for kp in keypoints], dtype=np.float32)
     
     # Camera intrinsic parameters (assuming typical camera - adjust as needed)
-    # These would normally come from camera calibration
     focal_length = max(w, h) * 0.8  # Rough estimate
     cx, cy = w / 2.0, h / 2.0
     camera_matrix = np.array([
@@ -67,80 +124,6 @@ def extract_features_vggt(image_path, output_path):
     return poses, points_3D
 
 
-def generate_synthetic_3d_points(points_2d, camera_matrix):
-    """
-    Generate synthetic 3D points from 2D points.
-    In a real implementation, this would use stereo vision, SfM, or depth estimation.
-    """
-    # Assume points are at various depths between 1 and 10 units
-    np.random.seed(42)  # For reproducible results
-    depths = np.random.uniform(1.0, 10.0, len(points_2d))
-    
-    # Convert 2D points to normalized camera coordinates
-    fx, fy = camera_matrix[0, 0], camera_matrix[1, 1]
-    cx, cy = camera_matrix[0, 2], camera_matrix[1, 2]
-    
-    points_3D = []
-    for i, (u, v) in enumerate(points_2d):
-        # Convert to normalized coordinates and then to 3D
-        x_norm = (u - cx) / fx
-        y_norm = (v - cy) / fy
-        depth = depths[i]
-        
-        x_3d = x_norm * depth
-        y_3d = y_norm * depth
-        z_3d = depth
-        
-        points_3D.append([x_3d, y_3d, z_3d])
-    
-    return np.array(points_3D, dtype=np.float32)
-
-
-def estimate_camera_poses(points_2d, points_3D, camera_matrix, dist_coeffs):
-    """
-    Estimate camera pose using PnP solver.
-    """
-    poses = []
-    
-    if len(points_2d) >= 4 and len(points_3D) >= 4:
-        try:
-            # Use RANSAC-based PnP solver for robustness
-            success, rvec, tvec, inliers = cv2.solvePnPRansac(
-                points_3D, points_2d, camera_matrix, dist_coeffs,
-                reprojectionError=3.0,
-                confidence=0.99
-            )
-            
-            if success:
-                # Convert rotation vector to rotation matrix
-                rotation_matrix, _ = cv2.Rodrigues(rvec)
-                
-                # Create 4x4 transformation matrix
-                pose = np.eye(4)
-                pose[:3, :3] = rotation_matrix
-                pose[:3, 3] = tvec.flatten()
-                
-                poses.append({
-                    'rotation_matrix': rotation_matrix,
-                    'translation_vector': tvec,
-                    'transformation_matrix': pose,
-                    'inliers': inliers,
-                    'num_inliers': len(inliers) if inliers is not None else 0
-                })
-                
-                print(f"Camera pose estimated with {len(inliers) if inliers is not None else 0} inliers")
-            else:
-                print("Failed to estimate camera pose")
-                
-        except cv2.error as e:
-            print(f"Error in pose estimation: {e}")
-    
-    else:
-        print(f"Insufficient points for pose estimation: {len(points_2d)} 2D points, {len(points_3D)} 3D points")
-    
-    return poses
-
-
 def save_features(output_path, poses, points_3D, points_2d, descriptors, keypoints, camera_matrix):
     """
     Save extracted features to file.
@@ -148,14 +131,14 @@ def save_features(output_path, poses, points_3D, points_2d, descriptors, keypoin
     # Prepare data for saving
     feature_data = {
         'poses': poses,
-        'points_3D': points_3D,
-        'points_2d': points_2d,
-        'descriptors': descriptors,
-        'keypoint_coordinates': np.array([kp.pt for kp in keypoints]),
-        'keypoint_responses': np.array([kp.response for kp in keypoints]),
-        'keypoint_angles': np.array([kp.angle for kp in keypoints]),
-        'camera_matrix': camera_matrix,
-        'num_features': len(points_2d)
+        'points_3D': points_3D.tolist(),
+        'points_2d': points_2d.tolist() if points_2d is not None else None,
+        'descriptors': descriptors.tolist() if descriptors is not None else None,
+        'keypoint_coordinates': np.array([kp.pt for kp in keypoints]).tolist() if keypoints else None,
+        'keypoint_responses': np.array([kp.response for kp in keypoints]).tolist() if keypoints else None,
+        'keypoint_angles': np.array([kp.angle for kp in keypoints]).tolist() if keypoints else None,
+        'camera_matrix': camera_matrix.tolist(),
+        'num_features': len(points_2d) if points_2d is not None else 0
     }
     
     # Save as numpy archive
@@ -167,17 +150,6 @@ def save_features(output_path, poses, points_3D, points_2d, descriptors, keypoin
         npz_path = str(Path(output_path).with_suffix('.npz'))
         np.savez_compressed(npz_path, **feature_data)
         print(f"Features saved to {npz_path}")
-
-
-def load_features(feature_path):
-    """
-    Load previously saved features.
-    """
-    if not os.path.exists(feature_path):
-        raise FileNotFoundError(f"Feature file not found: {feature_path}")
-    
-    data = np.load(feature_path, allow_pickle=True)
-    return {key: data[key] for key in data.keys()}
 
 
 # Example usage
