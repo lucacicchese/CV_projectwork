@@ -3,7 +3,7 @@ import cv2
 import os
 from pathlib import Path
 
-def extract_features(image_path, output_path):
+def extract_features_vggt(image_path, output_path):
     """
     Extract features from an image using VGGT (Visual-Geometric Feature Extraction).
     
@@ -182,23 +182,15 @@ def load_features(feature_path):
 
 # Example usage
 if __name__ == "__main__":
-    # Example usage
-    image_path = "sample_image.jpg"
-    output_path = "extracted_features.npz"
+    poses, point_cloud = extract_features_vggt(
+        image_folder="data/gerrard-hall/images/",
+        output_folder="data/vggt_reconstruction"
+    )
     
-    try:
-        poses, points_3D = extract_features(image_path, output_path)
-        
-        if poses and points_3D is not None:
-            print(f"Extracted {len(points_3D)} 3D points")
-            print(f"Estimated {len(poses)} camera poses")
-            
-            # Print first pose information if available
-            if poses:
-                pose = poses[0]
-                print(f"First pose has {pose['num_inliers']} inliers")
-                print(f"Translation: {pose['translation_vector'].flatten()}")
-                print(f"Rotation matrix shape: {pose['rotation_matrix'].shape}")
-        
-    except Exception as e:
-        print(f"Error: {e}")
+    print(f"Extracted {len(poses)} camera poses")
+    print(f"Extracted {len(point_cloud)} 3D points")
+    
+    # Optional: visualize results
+    print("Results saved to data/vggt_reconstruction/")
+    print("Camera poses saved to: camera_poses.json")
+    print("Point cloud saved to: point_cloud.json")
