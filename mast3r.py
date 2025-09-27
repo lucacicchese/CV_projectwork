@@ -1,305 +1,171 @@
 import os
-import numpy as np
-import torch
-from PIL import Image
+import sys
 import json
+import numpy as np
+from scipy.spatial.transform import Rotation as R
+import torch
+from torchvision.io import read_image
 from pathlib import Path
 
-# MASt3R imports - you may need to install from: https://github.com/naver/mast3r
-try:
-    from mast3r.model import AsymmetricMASt3R
-    from dust3r.utils.image import load_images
-    from mast3r.cloud_opt import global_alignment_loop
-    from mast3r.viz import show_raw_pointcloud
-except ImportError:
-    print("MASt3R not found. Please install it from: https://github.com/naver/mast3r")
-    raise
+# Add mast3r directory to Python path (assuming mast3r is sibling to project folder)
+mast3r_path = Path(os.path.dirname(os.path.abspath(__file__))).parent / "mast3r"
+if str(mast3r_path) not in sys.path:
+    sys.path.append(str(mast3r_path))
 
-def extract_features_mast3r(image_folder, output_folder="data/mast3r_reconstruction", model_name='MASt3R_ViTLarge_BaseDecoder_512_catmlpdpt_metric'):
+from dust3r.inference import inference_pairs
+from dust3r.model import AsymmetricCroCoHead
+from dust3r.image_pairs import make_pairs
+from dust3r.utils.image import load_images
+
+def extract_features_mast3r(image_folder, output_folder="data/mast3r_reconstruction", model_name=None):
     """
-    Extract camera poses and 3D point cloud using MASt3R
+    Extract 3D points and camera poses from a dataset using MASt3R, 
+    then convert to COLMAP-compatible formats for comparison.
     
     Args:
-        image_folder: Path to folder containing images
-        output_folder: Path to save reconstruction results
-        model_name: MASt3R model to use
-    """
+        image_folder (str): Path to folder containing images (.jpg, .png, etc.).
+        output_folder (str): Path to save outputs (3D points, poses, etc.). Defaults to 'data/mast3r_reconstruction'.
+        model_name (str): Name of the MASt3R model checkpoint (e.g., 'MASt3R_ViTLarge_BaseDecoder_512_catmlpdpt_metric').
     
-    input_folder = Path(image_folder)
+    Returns:
+        dict: Paths to output files, including COLMAP txt files.
+    """
+    # Validate inputs
+    image_folder = Path(image_folder)
     output_folder = Path(output_folder)
+    if not image_folder.is_dir():
+        raise ValueError(f"Image folder {image_folder} does not exist.")
+    if not model_name:
+        model_name = "MASt3R_ViTLarge_BaseDecoder_512_catmlpdpt_metric"
+    
+    # Ensure output directory exists
     output_folder.mkdir(parents=True, exist_ok=True)
     
-    # Cache files
-    poses_cache = output_folder / "camera_poses.json"
-    pointcloud_cache = output_folder / "point_cloud.json"
+    # Paths to checkpoint (relative to mast3r folder)
+    checkpoint_dir = mast3r_path / "checkpoints"
+    model_path = checkpoint_dir / f"{model_name}.pth"
+    if not model_path.exists():
+        raise FileNotFoundError(f"Model checkpoint {model_path} not found. Please download it to {checkpoint_dir}.")
     
-    # Check if reconstruction already exists
-    if poses_cache.exists() and pointcloud_cache.exists():
-        print("MASt3R reconstruction already exists, loading from cache...")
-        try:
-            with open(poses_cache, 'r') as f:
-                camera_poses = json.load(f)
-            with open(pointcloud_cache, 'r') as f:
-                point_cloud = json.load(f)
-            print(f"Loaded {len(camera_poses)} camera poses and {len(point_cloud)} 3D points from cache")
-            return camera_poses, point_cloud
-        except Exception as e:
-            print(f"Failed to load cached reconstruction: {e}")
-            print("Proceeding with fresh extraction...")
-    
-    # Load and prepare images
-    print("Loading images...")
-    image_paths = []
-    valid_extensions = {'.jpg', '.jpeg', '.png', '.tiff', '.tif'}
-    
-    for img_path in input_folder.iterdir():
-        if img_path.suffix.lower() in valid_extensions:
-            image_paths.append(str(img_path))
-    
-    if len(image_paths) < 2:
-        raise ValueError(f"Need at least 2 images, found {len(image_paths)}")
-    
-    image_paths.sort()  # Ensure consistent ordering
-    print(f"Found {len(image_paths)} images")
-    
-    # Resize images if needed
-    resized_folder = input_folder.parent / f"{input_folder.name}_resized"
-    resized_folder.mkdir(exist_ok=True)
-    
-    max_size = 512  # MASt3R typically works well with 512x512
-    resized_paths = []
-    
-    for img_path in image_paths:
-        img_name = Path(img_path).name
-        resized_path = resized_folder / img_name
-        
-        if not resized_path.exists():
-            print(f"Resizing {img_name}...")
-            img = Image.open(img_path)
-            # Resize while maintaining aspect ratio
-            img.thumbnail((max_size, max_size), Image.Resampling.LANCZOS)
-            img.save(resized_path, quality=95)
-        
-        resized_paths.append(str(resized_path))
+    # Get sorted list of images
+    images = sorted([f for f in os.listdir(image_folder) if f.lower().endswith(('.jpg', '.jpeg', '.png'))])
+    num_images = len(images)
+    if num_images < 2:
+        raise ValueError("At least two images are required for pairwise processing.")
     
     # Load MASt3R model
-    print(f"Loading MASt3R model: {model_name}")
-    device = 'cuda' if torch.cuda.is_available() else 'cpu'
-    print(f"Using device: {device}")
+    device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
+    model = AsymmetricCroCoHead.from_pretrained(str(model_path)).to(device).eval()
     
-    model = AsymmetricMASt3R.from_pretrained(model_name).to(device)
+    # Load images and create pairs
+    img_paths = [str(image_folder / img) for img in images]
+    imgs = load_images(img_paths, size=512)  # Resize to 512 as per MASt3R default
+    pairs = make_pairs(imgs, scene_graph="sequential", prefilter=None, symmetrize=False)
     
-    # Load images for processing
-    images = load_images(resized_paths, size=max_size)
+    # Run inference
+    with torch.no_grad():
+        output = inference_pairs(pairs, model, device, batch_size=1)
     
-    # Run MASt3R pairwise matching
-    print("Running MASt3R pairwise matching...")
-    pairs = []
-    outputs = []
+    # Extract poses and points
+    poses = []  # Camera-to-world matrices
+    points3d_all = []
+    intrinsics = []
     
-    # Create all possible pairs
-    for i in range(len(images)):
-        for j in range(i + 1, len(images)):
-            pairs.append((i, j))
+    for (img1_idx, img2_idx), pred in zip(pairs, output):
+        # Extract predictions
+        pts3d_1 = pred['pts3d'].cpu().numpy()  # [H, W, 3]
+        pts3d_2 = pred['pts3d_in_other_view'].cpu().numpy()  # [H, W, 3]
+        conf = pred['conf'].cpu().numpy()  # [H, W]
+        pose1 = pred['view1']['cam2world'].cpu().numpy()  # [4, 4]
+        pose2 = pred['view2']['cam2world'].cpu().numpy()  # [4, 4]
+        K1 = pred['view1']['K'].cpu().numpy()  # [3, 3]
+        K2 = pred['view2']['K'].cpu().numpy()  # [3, 3]
+        
+        # Store poses and intrinsics (only for first appearance of each image)
+        if len(poses) <= img1_idx:
+            poses.append(pose1)
+            intrinsics.append({'K': K1.tolist()})
+        if len(poses) <= img2_idx:
+            poses.append(pose2)
+            intrinsics.append({'K': K2.tolist()})
+        
+        # Filter points by confidence and flatten
+        valid = conf > 0.5  # Arbitrary threshold; adjust as needed
+        pts3d = np.concatenate([pts3d_1[valid], pts3d_2[valid]], axis=0)
+        points3d_all.append(pts3d)
     
-    print(f"Processing {len(pairs)} image pairs...")
+    # Merge points (simple concatenation; no deduplication)
+    points3d = np.concatenate(points3d_all, axis=0) if points3d_all else np.zeros((0, 3))
+    poses = np.array(poses)  # [num_images, 4, 4]
     
-    # Process pairs
-    for i, (idx1, idx2) in enumerate(pairs):
-        if i % 10 == 0:
-            print(f"Processing pair {i+1}/{len(pairs)}")
-        
-        img1 = images[idx1]
-        img2 = images[idx2]
-        
-        # Prepare batch
-        batch = {
-            'view1': {
-                'img': img1['img'].unsqueeze(0).to(device),
-                'true_shape': img1['true_shape'].unsqueeze(0).to(device),
-                'idx': idx1,
-                'instance': str(resized_paths[idx1])
-            },
-            'view2': {
-                'img': img2['img'].unsqueeze(0).to(device),
-                'true_shape': img2['true_shape'].unsqueeze(0).to(device),
-                'idx': idx2,
-                'instance': str(resized_paths[idx2])
-            }
-        }
-        
-        # Run inference
-        with torch.no_grad():
-            output = model(batch)
-        
-        outputs.append({
-            'view1': {
-                'idx': idx1,
-                'instance': str(resized_paths[idx1]),
-                'pred': output['view1']['pred'].cpu(),
-                'conf': output['view1']['conf'].cpu()
-            },
-            'view2': {
-                'idx': idx2,
-                'instance': str(resized_paths[idx2]),
-                'pred': output['view2']['pred'].cpu(),
-                'conf': output['view2']['conf'].cpu()
-            }
-        })
+    # Save native outputs
+    np.save(output_folder / "pts3d.npy", points3d)
+    np.save(output_folder / "cam2w.npy", poses)
+    with open(output_folder / "intrinsics.json", 'w') as f:
+        json.dump(intrinsics, f)
     
-    # Global alignment
-    print("Running global alignment...")
-    try:
-        scene = global_alignment_loop(
-            outputs,
-            lr=0.01,
-            niter=300,
-            schedule='cosine',
-            verbose=True
-        )
-        
-        # Extract camera poses
-        camera_poses = {}
-        for i, img_path in enumerate(resized_paths):
-            img_name = Path(img_path).name
-            
-            # Get camera parameters
-            if hasattr(scene, 'get_focals'):
-                focal = scene.get_focals()[i].item()
-            else:
-                focal = 500.0  # Default focal length
-            
-            if hasattr(scene, 'get_poses'):
-                pose = scene.get_poses()[i].cpu().numpy()
-            else:
-                # Fallback: identity pose
-                pose = np.eye(4)
-            
-            # Extract rotation and translation
-            rotation = pose[:3, :3]
-            translation = pose[:3, 3]
-            
-            camera_poses[img_name] = {
-                'image_id': i,
-                'rotation_matrix': rotation.tolist(),
-                'translation': translation.tolist(),
-                'camera_center': (-rotation.T @ translation).tolist(),
-                'focal_length': focal,
-                'pose_matrix': pose.tolist()
-            }
-        
-        # Extract point cloud
-        print("Extracting point cloud...")
-        point_cloud = []
-        
-        if hasattr(scene, 'get_pts3d'):
-            pts3d = scene.get_pts3d()
-            if hasattr(scene, 'get_masks'):
-                masks = scene.get_masks()
-            else:
-                masks = [torch.ones_like(pts[:, :, 0], dtype=torch.bool) for pts in pts3d]
-            
-            point_id = 0
-            for i, (pts, mask) in enumerate(zip(pts3d, masks)):
-                pts = pts.cpu().numpy()
-                mask = mask.cpu().numpy()
-                
-                # Get valid points
-                valid_pts = pts[mask]
-                
-                # Add color if available (use image colors)
-                img = Image.open(resized_paths[i])
-                img_array = np.array(img)
-                
-                if len(img_array.shape) == 3:
-                    colors = img_array[mask] if mask.shape == img_array.shape[:2] else [128, 128, 128]
-                else:
-                    colors = [128, 128, 128]  # Default gray
-                
-                for j, pt in enumerate(valid_pts):
-                    if len(pt) >= 3 and not np.any(np.isnan(pt[:3])) and not np.any(np.isinf(pt[:3])):
-                        color = colors[j] if isinstance(colors, np.ndarray) and j < len(colors) else [128, 128, 128]
-                        if not isinstance(color, (list, np.ndarray)) or len(color) < 3:
-                            color = [128, 128, 128]
-                        
-                        point_cloud.append({
-                            'point_id': point_id,
-                            'xyz': pt[:3].tolist(),
-                            'color': color[:3].tolist() if isinstance(color, np.ndarray) else color,
-                            'error': 0.0  # MASt3R doesn't provide reprojection error
-                        })
-                        point_id += 1
-        
-        print(f"Extracted {len(camera_poses)} camera poses")
-        print(f"Extracted {len(point_cloud)} 3D points")
-        
-        # Save cache
-        with open(poses_cache, 'w') as f:
-            json.dump(camera_poses, f, indent=2)
-        with open(pointcloud_cache, 'w') as f:
-            json.dump(point_cloud, f, indent=2)
-        
-        return camera_poses, point_cloud
-        
-    except Exception as e:
-        print(f"Global alignment failed: {e}")
-        print("Trying alternative approach...")
-        
-        # Fallback: extract poses and points directly from pairwise outputs
-        camera_poses = {}
-        point_cloud = []
-        
-        for i, img_path in enumerate(resized_paths):
-            img_name = Path(img_path).name
-            camera_poses[img_name] = {
-                'image_id': i,
-                'rotation_matrix': np.eye(3).tolist(),
-                'translation': [0.0, 0.0, 0.0],
-                'camera_center': [0.0, 0.0, 0.0],
-                'focal_length': 500.0,
-                'pose_matrix': np.eye(4).tolist()
-            }
-        
-        # Extract points from pairwise predictions
-        point_id = 0
-        for output in outputs:
-            pred1 = output['view1']['pred']
-            conf1 = output['view1']['conf']
-            
-            # Convert predictions to 3D points (simplified)
-            if pred1.shape[-1] >= 3:
-                valid_mask = conf1 > 0.5  # Confidence threshold
-                pts = pred1[valid_mask]
-                
-                for pt in pts:
-                    if len(pt) >= 3 and not torch.any(torch.isnan(pt[:3])) and not torch.any(torch.isinf(pt[:3])):
-                        point_cloud.append({
-                            'point_id': point_id,
-                            'xyz': pt[:3].tolist(),
-                            'color': [128, 128, 128],  # Default color
-                            'error': 0.0
-                        })
-                        point_id += 1
-        
-        # Save fallback results
-        with open(poses_cache, 'w') as f:
-            json.dump(camera_poses, f, indent=2)
-        with open(pointcloud_cache, 'w') as f:
-            json.dump(point_cloud, f, indent=2)
-        
-        print(f"Fallback extraction: {len(camera_poses)} camera poses, {len(point_cloud)} 3D points")
-        return camera_poses, point_cloud
+    # Convert to COLMAP formats
+    # Write cameras.txt
+    cameras_path = output_folder / "cameras.txt"
+    with open(cameras_path, 'w') as f:
+        f.write("# Camera list with one line of data per camera:\n")
+        f.write("#   CAMERA_ID, MODEL, WIDTH, HEIGHT, PARAMS[]\n")
+        for i, img_name in enumerate(images):
+            img_path = image_folder / img_name
+            img = read_image(str(img_path))
+            _, height, width = img.shape
+            K = intrinsics[i]['K']
+            fx = K[0][0]
+            fy = K[1][1]
+            cx = K[0][2]
+            cy = K[1][2]
+            f.write(f"{i+1} PINHOLE {width} {height} {fx} {fy} {cx} {cy}\n")
+    
+    # Write images.txt
+    images_path = output_folder / "images.txt"
+    with open(images_path, 'w') as f:
+        f.write("# Image list with two lines of data per image:\n")
+        f.write("#   IMAGE_ID, QW, QX, QY, QZ, TX, TY, TZ, CAMERA_ID, NAME\n")
+        f.write("#   POINTS2D[] as (X, Y, POINT3D_ID)\n")
+        for i, img_name in enumerate(images):
+            pose = poses[i]
+            R_cam2w = pose[:3, :3]
+            t = pose[:3, 3]
+            R_w2c_mat = R_cam2w.T
+            rot = R.from_matrix(R_w2c_mat)
+            quat_xyzw = rot.as_quat()  # [x, y, z, w]
+            qw, qx, qy, qz = quat_xyzw[3], quat_xyzw[0], quat_xyzw[1], quat_xyzw[2]
+            tx, ty, tz = t
+            f.write(f"{i+1} {qw} {qx} {qy} {qz} {tx} {ty} {tz} {i+1} {img_name}\n")
+            f.write("\n")  # No POINTS2D
+    
+    # Write points3D.txt
+    points3d_path = output_folder / "points3D.txt"
+    with open(points3d_path, 'w') as f:
+        f.write("# 3D point list with one line of data per point:\n")
+        f.write("#   POINT3D_ID, X, Y, Z, R, G, B, ERROR, TRACK[] as (IMAGE_ID, POINT2D_IDX)\n")
+        for pid, p in enumerate(points3d):
+            x, y, z = p
+            f.write(f"{pid+1} {x} {y} {z} 128 128 128 0.0\n")
+    
+    # Collect output paths
+    output_files = {
+        "pts3d": str(output_folder / "pts3d.npy"),
+        "cam2w": str(output_folder / "cam2w.npy"),
+        "intrinsics": str(output_folder / "intrinsics.json"),
+        "depthmaps": str(output_folder / "depthmaps"),
+        "cameras_txt": str(cameras_path),
+        "images_txt": str(images_path),
+        "points3D_txt": str(points3d_path)
+    }
+    
+    return output_files
 
 if __name__ == "__main__":
-    poses, point_cloud = extract_features_mast3r(
+    results = extract_features_mast3r(
         image_folder="data/gerrard-hall/images/",
-        output_folder="data/mast3r_reconstruction"
+        output_folder="data/mast3r_reconstruction",
+        model_name="MASt3R_ViTLarge_BaseDecoder_512_catmlpdpt_metric"
     )
-    
-    print(f"Extracted {len(poses)} camera poses")
-    print(f"Extracted {len(point_cloud)} 3D points")
-    
-    # Optional: visualize results
-    print("Results saved to data/mast3r_reconstruction/")
-    print("Camera poses saved to: camera_poses.json")
-    print("Point cloud saved to: point_cloud.json")
+    print("Output files:", results)
+        

@@ -27,6 +27,12 @@ Install COLMAP <https://colmap.github.io/index.html>
 The testing environment has been managed with anaconda:
 `conda env create -f environment.yml`
 
+## Datasets
+
+### Indoor dataset
+
+### Outdoor dataset
+
 ## Implementation
 
 ### main.py
