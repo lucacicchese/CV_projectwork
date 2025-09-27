@@ -6,6 +6,7 @@ from scipy.spatial.transform import Rotation as R
 import torch
 from torchvision.io import read_image
 from pathlib import Path
+import subprocess
 
 # Add mast3r directory to Python path
 parent_dir = Path(os.path.dirname(os.path.abspath(__file__))).parent
@@ -13,30 +14,15 @@ mast3r_path = parent_dir / "mast3r"
 if str(mast3r_path) not in sys.path:
     sys.path.append(str(mast3r_path))
 
-# Debugging: Print sys.path and verify dust3r files
-print("sys.path:", sys.path)
-print("mast3r path:", str(mast3r_path))
-print("dust3r/inference.py exists:", (mast3r_path / "dust3r" / "inference.py").exists())
-print("dust3r/utils/device.py exists:", (mast3r_path / "dust3r" / "utils" / "device.py").exists())
-print("dust3r/utils/__init__.py exists:", (mast3r_path / "dust3r" / "utils" / "__init__.py").exists())
-
-try:
-    from mast3r.dust3r.inference import inference_pairs
-    from mast3r.dust3r.model import AsymmetricCroCoHead
-    from mast3r.dust3r.image_pairs import make_pairs
-    from mast3r.dust3r.utils.image import load_images
-except ImportError as e:
-    raise ImportError(f"Failed to import dust3r modules: {e}. Ensure mast3r/dust3r/ contains inference.py, model.py, image_pairs.py, utils/__init__.py, and utils/device.py.")
-
 def extract_features_mast3r(image_folder, output_folder="data/mast3r_reconstruction", model_name=None):
     """
-    Extract 3D points and camera poses from a dataset using MASt3R,
-    then convert to COLMAP-compatible formats for comparison.
+    Extract 3D points and camera poses using MASt3R-SfM pipeline via demo.py,
+    then convert to COLMAP-compatible formats.
     
     Args:
         image_folder (str): Path to folder containing images (.jpg, .png, etc.).
-        output_folder (str): Path to save outputs (3D points, poses, etc.). Defaults to 'data/mast3r_reconstruction'.
-        model_name (str): Name of the MASt3R model checkpoint (e.g., 'MASt3R_ViTLarge_BaseDecoder_512_catmlpdpt_metric').
+        output_folder (str): Path to save outputs (3D points, poses, etc.).
+        model_name (str): Name of the MASt3R model checkpoint.
     
     Returns:
         dict: Paths to output files, including COLMAP txt files.
@@ -52,68 +38,45 @@ def extract_features_mast3r(image_folder, output_folder="data/mast3r_reconstruct
     # Ensure output directory exists
     output_folder.mkdir(parents=True, exist_ok=True)
     
-    # Paths to checkpoint (in mast3r/checkpoints/)
+    # Check for demo.py
+    demo_path = mast3r_path / "demo.py"
+    if not demo_path.exists():
+        raise FileNotFoundError(f"demo.py not found in {mast3r_path}. Ensure MASt3R repository is complete.")
+    
+    # Check for checkpoint
     checkpoint_dir = mast3r_path / "checkpoints"
     model_path = checkpoint_dir / f"{model_name}.pth"
     if not model_path.exists():
         raise FileNotFoundError(f"Model checkpoint {model_path} not found. Please download it to {checkpoint_dir}.")
     
+    # Run MASt3R-SfM pipeline via demo.py
+    cmd = [
+        "python3", "demo.py",
+        "--model_name", model_name,
+        "--image_dir", str(image_folder),
+        "--output_dir", str(output_folder),
+        "--top_k", "20"
+    ]
+    try:
+        subprocess.run(cmd, check=True, cwd=str(mast3r_path))
+    except subprocess.CalledProcessError as e:
+        raise RuntimeError(f"MASt3R-SfM pipeline failed: {e}")
+    
+    # Load MASt3R outputs (adjust paths based on demo.py output)
+    points3d_path = output_folder / "sparse" / "0" / "points3D.npy"
+    poses_path = output_folder / "sparse" / "0" / "cam2w.npy"
+    intrinsics_path = output_folder / "sparse" / "0" / "intrinsics.json"
+    
+    if not points3d_path.exists() or not poses_path.exists() or not intrinsics_path.exists():
+        raise FileNotFoundError(f"MASt3R outputs not found in {output_folder / 'sparse' / '0'}. Check demo.py execution.")
+    
+    points3d = np.load(points3d_path)
+    poses = np.load(poses_path)
+    with open(intrinsics_path, 'r') as f:
+        intrinsics = json.load(f)
+    
     # Get sorted list of images
     images = sorted([f for f in os.listdir(image_folder) if f.lower().endswith(('.jpg', '.jpeg', '.png'))])
-    num_images = len(images)
-    if num_images < 2:
-        raise ValueError("At least two images are required for pairwise processing.")
-    
-    # Load MASt3R model
-    device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
-    model = AsymmetricCroCoHead.from_pretrained(str(model_path)).to(device).eval()
-    
-    # Load images and create pairs
-    img_paths = [str(image_folder / img) for img in images]
-    imgs = load_images(img_paths, size=512)  # Resize to 512 as per MASt3R default
-    pairs = make_pairs(imgs, scene_graph="sequential", prefilter=None, symmetrize=False)
-    
-    # Run inference
-    with torch.no_grad():
-        output = inference_pairs(pairs, model, device, batch_size=1)
-    
-    # Extract poses and points
-    poses = []  # Camera-to-world matrices
-    points3d_all = []
-    intrinsics = []
-    
-    for (img1_idx, img2_idx), pred in zip(pairs, output):
-        # Extract predictions
-        pts3d_1 = pred['pts3d'].cpu().numpy()  # [H, W, 3]
-        pts3d_2 = pred['pts3d_in_other_view'].cpu().numpy()  # [H, W, 3]
-        conf = pred['conf'].cpu().numpy()  # [H, W]
-        pose1 = pred['view1']['cam2world'].cpu().numpy()  # [4, 4]
-        pose2 = pred['view2']['cam2world'].cpu().numpy()  # [4, 4]
-        K1 = pred['view1']['K'].cpu().numpy()  # [3, 3]
-        K2 = pred['view2']['K'].cpu().numpy()  # [3, 3]
-        
-        # Store poses and intrinsics (only for first appearance of each image)
-        if len(poses) <= img1_idx:
-            poses.append(pose1)
-            intrinsics.append({'K': K1.tolist()})
-        if len(poses) <= img2_idx:
-            poses.append(pose2)
-            intrinsics.append({'K': K2.tolist()})
-        
-        # Filter points by confidence and flatten
-        valid = conf > 0.5  # Arbitrary threshold; adjust as needed
-        pts3d = np.concatenate([pts3d_1[valid], pts3d_2[valid]], axis=0)
-        points3d_all.append(pts3d)
-    
-    # Merge points (simple concatenation; no deduplication)
-    points3d = np.concatenate(points3d_all, axis=0) if points3d_all else np.zeros((0, 3))
-    poses = np.array(poses)  # [num_images, 4, 4]
-    
-    # Save native outputs
-    np.save(output_folder / "pts3d.npy", points3d)
-    np.save(output_folder / "cam2w.npy", poses)
-    with open(output_folder / "intrinsics.json", 'w') as f:
-        json.dump(intrinsics, f)
     
     # Convert to COLMAP formats
     # Write cameras.txt
@@ -151,8 +114,8 @@ def extract_features_mast3r(image_folder, output_folder="data/mast3r_reconstruct
             f.write("\n")  # No POINTS2D
     
     # Write points3D.txt
-    points3d_path = output_folder / "points3D.txt"
-    with open(points3d_path, 'w') as f:
+    points3d_path_txt = output_folder / "points3D.txt"
+    with open(points3d_path_txt, 'w') as f:
         f.write("# 3D point list with one line of data per point:\n")
         f.write("#   POINT3D_ID, X, Y, Z, R, G, B, ERROR, TRACK[] as (IMAGE_ID, POINT2D_IDX)\n")
         for pid, p in enumerate(points3d):
@@ -161,13 +124,13 @@ def extract_features_mast3r(image_folder, output_folder="data/mast3r_reconstruct
     
     # Collect output paths
     output_files = {
-        "pts3d": str(output_folder / "pts3d.npy"),
-        "cam2w": str(output_folder / "cam2w.npy"),
-        "intrinsics": str(output_folder / "intrinsics.json"),
+        "pts3d": str(points3d_path),
+        "cam2w": str(poses_path),
+        "intrinsics": str(intrinsics_path),
         "depthmaps": str(output_folder / "depthmaps"),
         "cameras_txt": str(cameras_path),
         "images_txt": str(images_path),
-        "points3D_txt": str(points3d_path)
+        "points3D_txt": str(points3d_path_txt)
     }
     
     return output_files
