@@ -7,22 +7,29 @@ import torch
 from torchvision.io import read_image
 from pathlib import Path
 
-# Add mast3r and dust3r directories to Python path (siblings to project folder)
+# Add mast3r and inner dust3r directories to Python path
 parent_dir = Path(os.path.dirname(os.path.abspath(__file__))).parent
 mast3r_path = parent_dir / "mast3r"
-dust3r_path = parent_dir / "dust3r/dust3r"
+dust3r_path = parent_dir / "dust3r" / "dust3r"  # Point to inner dust3r folder
 for path in [mast3r_path, dust3r_path]:
     if str(path) not in sys.path:
         sys.path.append(str(path))
 
-from inference import inference_pairs
-from model import AsymmetricCroCoHead
-from image_pairs import make_pairs
-from utils.image import load_images
+# Debugging: Print sys.path to verify
+print("sys.path:", sys.path)
+print("dust3r path:", str(dust3r_path))
+
+try:
+    from inference import inference_pairs
+    from model import AsymmetricCroCoHead
+    from image_pairs import make_pairs
+    from utils.image import load_images
+except ImportError as e:
+    raise ImportError(f"Failed to import dust3r modules: {e}. Ensure dust3r/dust3r/ contains inference.py, model.py, image_pairs.py, and utils/image.py.")
 
 def extract_features_mast3r(image_folder, output_folder="data/mast3r_reconstruction", model_name=None):
     """
-    Extract 3D points and camera poses from a dataset using MASt3R, 
+    Extract 3D points and camera poses from a dataset using MASt3R,
     then convert to COLMAP-compatible formats for comparison.
     
     Args:
@@ -163,6 +170,7 @@ def extract_features_mast3r(image_folder, output_folder="data/mast3r_reconstruct
     }
     
     return output_files
+
 
 if __name__ == "__main__":
     results = extract_features_mast3r(
