@@ -7,15 +7,18 @@ import torch
 from torchvision.io import read_image
 from pathlib import Path
 
-# Add mast3r directory to Python path (assuming mast3r is sibling to project folder)
-mast3r_path = Path(os.path.dirname(os.path.abspath(__file__))).parent / "mast3r"
-if str(mast3r_path) not in sys.path:
-    sys.path.append(str(mast3r_path))
+# Add mast3r and dust3r directories to Python path (siblings to project folder)
+parent_dir = Path(os.path.dirname(os.path.abspath(__file__))).parent
+mast3r_path = parent_dir / "mast3r"
+dust3r_path = parent_dir / "dust3r/dust3r"
+for path in [mast3r_path, dust3r_path]:
+    if str(path) not in sys.path:
+        sys.path.append(str(path))
 
-from dust3r.inference import inference_pairs
-from dust3r.model import AsymmetricCroCoHead
-from dust3r.image_pairs import make_pairs
-from dust3r.utils.image import load_images
+from inference import inference_pairs
+from model import AsymmetricCroCoHead
+from image_pairs import make_pairs
+from utils.image import load_images
 
 def extract_features_mast3r(image_folder, output_folder="data/mast3r_reconstruction", model_name=None):
     """
@@ -41,7 +44,7 @@ def extract_features_mast3r(image_folder, output_folder="data/mast3r_reconstruct
     # Ensure output directory exists
     output_folder.mkdir(parents=True, exist_ok=True)
     
-    # Paths to checkpoint (relative to mast3r folder)
+    # Paths to checkpoint (in mast3r/checkpoints/)
     checkpoint_dir = mast3r_path / "checkpoints"
     model_path = checkpoint_dir / f"{model_name}.pth"
     if not model_path.exists():
