@@ -7,6 +7,7 @@ import torch
 from torchvision.io import read_image
 from pathlib import Path
 import subprocess
+from huggingface_hub import hf_hub_download
 
 # Add mast3r directory to Python path
 parent_dir = Path(os.path.dirname(os.path.abspath(__file__))).parent
@@ -33,7 +34,7 @@ def extract_features_mast3r(image_folder, output_folder="data/mast3r_reconstruct
     if not image_folder.is_dir():
         raise ValueError(f"Image folder {image_folder} does not exist.")
     if not model_name:
-        model_name = "MASt3R_ViTLarge_BaseDecoder_512_catmlpdpt_metric"
+        model_name = "MASt3R_ViTLarge_BaseDecoder_512_catmlpdpt_nonmetric"
     
     # Ensure output directory exists
     output_folder.mkdir(parents=True, exist_ok=True)
@@ -43,11 +44,21 @@ def extract_features_mast3r(image_folder, output_folder="data/mast3r_reconstruct
     if not demo_path.exists():
         raise FileNotFoundError(f"demo.py not found in {mast3r_path}. Ensure MASt3R repository is complete.")
     
-    # Check for checkpoint
+    # Download checkpoint if missing
     checkpoint_dir = mast3r_path / "checkpoints"
     model_path = checkpoint_dir / f"{model_name}.pth"
     if not model_path.exists():
-        raise FileNotFoundError(f"Model checkpoint {model_path} not found. Please download it to {checkpoint_dir}.")
+        print(f"Downloading {model_name} from Hugging Face...")
+        hf_hub_download(
+            repo_id="naver/MASt3R_ViTLarge_BaseDecoder_512_catmlpdpt_nonmetric",
+            filename=f"{model_name}.pth",
+            local_dir=str(checkpoint_dir),
+            local_dir_use_symlinks=False
+        )
+        model_path = checkpoint_dir / f"{model_name}.pth"
+    
+    if not model_path.exists():
+        raise FileNotFoundError(f"Model checkpoint {model_path} not found. Download failed.")
     
     # Run MASt3R-SfM pipeline via demo.py
     cmd = [
