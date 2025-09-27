@@ -7,25 +7,26 @@ import torch
 from torchvision.io import read_image
 from pathlib import Path
 
-# Add mast3r and inner dust3r directories to Python path
+# Add mast3r directory to Python path
 parent_dir = Path(os.path.dirname(os.path.abspath(__file__))).parent
 mast3r_path = parent_dir / "mast3r"
-dust3r_path = parent_dir / "dust3r" / "dust3r"  # Point to inner dust3r folder
-for path in [mast3r_path, dust3r_path]:
-    if str(path) not in sys.path:
-        sys.path.append(str(path))
+if str(mast3r_path) not in sys.path:
+    sys.path.append(str(mast3r_path))
 
-# Debugging: Print sys.path to verify
+# Debugging: Print sys.path and verify dust3r files
 print("sys.path:", sys.path)
-print("dust3r path:", str(dust3r_path))
+print("mast3r path:", str(mast3r_path))
+print("dust3r/inference.py exists:", (mast3r_path / "dust3r" / "inference.py").exists())
+print("dust3r/utils/device.py exists:", (mast3r_path / "dust3r" / "utils" / "device.py").exists())
+print("dust3r/utils/__init__.py exists:", (mast3r_path / "dust3r" / "utils" / "__init__.py").exists())
 
 try:
-    from inference import inference_pairs
-    from model import AsymmetricCroCoHead
-    from image_pairs import make_pairs
-    from utils.image import load_images
+    from mast3r.dust3r.inference import inference_pairs
+    from mast3r.dust3r.model import AsymmetricCroCoHead
+    from mast3r.dust3r.image_pairs import make_pairs
+    from mast3r.dust3r.utils.image import load_images
 except ImportError as e:
-    raise ImportError(f"Failed to import dust3r modules: {e}. Ensure dust3r/dust3r/ contains inference.py, model.py, image_pairs.py, and utils/image.py.")
+    raise ImportError(f"Failed to import dust3r modules: {e}. Ensure mast3r/dust3r/ contains inference.py, model.py, image_pairs.py, utils/__init__.py, and utils/device.py.")
 
 def extract_features_mast3r(image_folder, output_folder="data/mast3r_reconstruction", model_name=None):
     """
