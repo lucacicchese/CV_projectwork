@@ -1,157 +1,225 @@
-import os
 import sys
-import json
-import numpy as np
-from scipy.spatial.transform import Rotation as R
-import torch
-from torchvision.io import read_image
+import os
 from pathlib import Path
-import subprocess
-from huggingface_hub import hf_hub_download
+import torch
+import numpy as np
 
-# Add mast3r directory to Python path
-parent_dir = Path(os.path.dirname(os.path.abspath(__file__))).parent
+# Add mast3r to path
+current_dir = Path(__file__).parent
+parent_dir = current_dir.parent
 mast3r_path = parent_dir / "mast3r"
-if str(mast3r_path) not in sys.path:
-    sys.path.append(str(mast3r_path))
+sys.path.insert(0, str(mast3r_path))
 
-def extract_features_mast3r(image_folder, output_folder="data/mast3r_reconstruction", model_name=None):
+from mast3r.model import AsymmetricMASt3R
+from mast3r.fast_nn import fast_reciprocal_NNs
+from mast3r.cloud_opt.sparse_ga import sparse_global_alignment
+from dust3r.image_pairs import make_pairs
+from dust3r.inference import inference
+from dust3r.utils.image import load_images
+
+
+# Define schedule functions directly
+def cosine_schedule(t, lr_start, lr_end):
+    """Cosine learning rate schedule"""
+    return lr_end + (lr_start - lr_end) * (1 + np.cos(np.pi * t)) / 2
+
+
+def linear_schedule(t, lr_start, lr_end):
+    """Linear learning rate schedule"""
+    return lr_start + (lr_end - lr_start) * t
+
+
+def extract_features_mast3r(image_folder, output_folder, model_name="naver/MASt3R_ViTLarge_BaseDecoder_512_catmlpdpt_metric", 
+                             device='cuda', batch_size=1, schedule='cosine', lr=0.01, niter=300, 
+                             image_size=512, max_images=None, scene_graph='swin'):
     """
-    Extract 3D points and camera poses using MASt3R-SfM pipeline via demo.py,
-    then convert to COLMAP-compatible formats.
+    Extract features and perform SfM using MASt3R pipeline.
     
     Args:
-        image_folder (str): Path to folder containing images (.jpg, .png, etc.).
-        output_folder (str): Path to save outputs (3D points, poses, etc.).
-        model_name (str): Name of the MASt3R model checkpoint.
+        image_folder (str): Path to folder containing input images
+        output_folder (str): Path to folder where outputs will be saved
+        model_name (str): Model checkpoint name
+        device (str): Device to run on ('cuda' or 'cpu')
+        batch_size (int): Batch size for inference
+        schedule (str): Learning rate schedule ('cosine' or 'linear')
+        lr (float): Learning rate for optimization
+        niter (int): Number of iterations for optimization
+        image_size (int): Image size for processing (default: 512)
+        max_images (int): Maximum number of images to process (None for all)
+        scene_graph (str): Scene graph type ('complete', 'swin', 'oneref'). Use 'swin' or 'oneref' for lower memory
     
     Returns:
-        dict: Paths to output files, including COLMAP txt files.
+        dict: Dictionary containing scene reconstruction results
     """
-    # Validate inputs
-    image_folder = Path(image_folder)
-    output_folder = Path(output_folder)
-    if not image_folder.is_dir():
-        raise ValueError(f"Image folder {image_folder} does not exist.")
-    if not model_name:
-        model_name = "MASt3R_ViTLarge_BaseDecoder_512_catmlpdpt_nonmetric"
+    # Create output folder if it doesn't exist
+    os.makedirs(output_folder, exist_ok=True)
     
-    # Ensure output directory exists
-    output_folder.mkdir(parents=True, exist_ok=True)
+    # Convert schedule string to function
+    if schedule == 'cosine':
+        schedule_fn = cosine_schedule
+    elif schedule == 'linear':
+        schedule_fn = linear_schedule
+    else:
+        raise ValueError(f"Unknown schedule: {schedule}. Use 'cosine' or 'linear'")
     
-    # Check for demo.py
-    demo_path = mast3r_path / "demo.py"
-    if not demo_path.exists():
-        raise FileNotFoundError(f"demo.py not found in {mast3r_path}. Ensure MASt3R repository is complete.")
+    # Load the model
+    print(f"Loading model: {model_name}")
+    model = AsymmetricMASt3R.from_pretrained(model_name).to(device)
     
-    # Download checkpoint if missing
-    checkpoint_dir = mast3r_path / "checkpoints"
-    model_path = checkpoint_dir / f"{model_name}.pth"
-    if not model_path.exists():
-        print(f"Downloading {model_name} from Hugging Face...")
-        hf_hub_download(
-            repo_id="naver/MASt3R_ViTLarge_BaseDecoder_512_catmlpdpt_nonmetric",
-            filename=f"{model_name}.pth",
-            local_dir=str(checkpoint_dir),
-            local_dir_use_symlinks=False
-        )
-        model_path = checkpoint_dir / f"{model_name}.pth"
+    # Load images
+    print(f"Loading images from: {image_folder}")
+    images = load_images(image_folder, size=image_size)
     
-    if not model_path.exists():
-        raise FileNotFoundError(f"Model checkpoint {model_path} not found. Download failed.")
+    if len(images) == 0:
+        raise ValueError(f"No images found in {image_folder}")
     
-    # Run MASt3R-SfM pipeline via demo.py
-    cmd = [
-        "python3", "demo.py",
-        "--model_name", model_name,
-        "--image_dir", str(image_folder),
-        "--output_dir", str(output_folder),
-        "--top_k", "20"
-    ]
-    try:
-        subprocess.run(cmd, check=True, cwd=str(mast3r_path))
-    except subprocess.CalledProcessError as e:
-        raise RuntimeError(f"MASt3R-SfM pipeline failed: {e}")
+    # Limit number of images if specified
+    if max_images is not None and len(images) > max_images:
+        print(f"Limiting to {max_images} images (out of {len(images)})")
+        images = images[:max_images]
     
-    # Load MASt3R outputs (adjust paths based on demo.py output)
-    points3d_path = output_folder / "sparse" / "0" / "points3D.npy"
-    poses_path = output_folder / "sparse" / "0" / "cam2w.npy"
-    intrinsics_path = output_folder / "sparse" / "0" / "intrinsics.json"
+    # Get the actual image file paths for the imgs_dict
+    # load_images returns images but we need to track their original paths
+    import glob
+    image_files = sorted(glob.glob(os.path.join(image_folder, '*')))
+    # Filter for common image extensions
+    image_files = [f for f in image_files if f.lower().endswith(('.png', '.jpg', '.jpeg', '.JPG', '.PNG'))]
     
-    if not points3d_path.exists() or not poses_path.exists() or not intrinsics_path.exists():
-        raise FileNotFoundError(f"MASt3R outputs not found in {output_folder / 'sparse' / '0'}. Check demo.py execution.")
+    if max_images is not None:
+        image_files = image_files[:max_images]
     
-    points3d = np.load(points3d_path)
-    poses = np.load(poses_path)
-    with open(intrinsics_path, 'r') as f:
-        intrinsics = json.load(f)
+    print(f"Processing {len(images)} images with scene_graph='{scene_graph}'")
     
-    # Get sorted list of images
-    images = sorted([f for f in os.listdir(image_folder) if f.lower().endswith(('.jpg', '.jpeg', '.png'))])
+    # Create pairs for processing - use swin or oneref for lower memory usage
+    pairs = make_pairs(images, scene_graph=scene_graph, prefilter=None, symmetrize=True)
+    print(f"Created {len(pairs)} image pairs")
     
-    # Convert to COLMAP formats
-    # Write cameras.txt
-    cameras_path = output_folder / "cameras.txt"
-    with open(cameras_path, 'w') as f:
-        f.write("# Camera list with one line of data per camera:\n")
-        f.write("#   CAMERA_ID, MODEL, WIDTH, HEIGHT, PARAMS[]\n")
-        for i, img_name in enumerate(images):
-            img_path = image_folder / img_name
-            img = read_image(str(img_path))
-            _, height, width = img.shape
-            K = intrinsics[i]['K']
-            fx = K[0][0]
-            fy = K[1][1]
-            cx = K[0][2]
-            cy = K[1][2]
-            f.write(f"{i+1} PINHOLE {width} {height} {fx} {fy} {cx} {cy}\n")
+    # Run inference
+    print("Running inference...")
+    output = inference(pairs, model, device, batch_size=batch_size)
+
+    # Clean up to free memory
+    torch.cuda.empty_cache() if device == 'cuda' else None
     
-    # Write images.txt
-    images_path = output_folder / "images.txt"
-    with open(images_path, 'w') as f:
-        f.write("# Image list with two lines of data per image:\n")
-        f.write("#   IMAGE_ID, QW, QX, QY, QZ, TX, TY, TZ, CAMERA_ID, NAME\n")
-        f.write("#   POINTS2D[] as (X, Y, POINT3D_ID)\n")
-        for i, img_name in enumerate(images):
-            pose = poses[i]
-            R_cam2w = pose[:3, :3]
-            t = pose[:3, 3]
-            R_w2c_mat = R_cam2w.T
-            rot = R.from_matrix(R_w2c_mat)
-            quat_xyzw = rot.as_quat()  # [x, y, z, w]
-            qw, qx, qy, qz = quat_xyzw[3], quat_xyzw[0], quat_xyzw[1], quat_xyzw[2]
-            tx, ty, tz = t
-            f.write(f"{i+1} {qw} {qx} {qy} {qz} {tx} {ty} {tz} {i+1} {img_name}\n")
-            f.write("\n")  # No POINTS2D
+    # Perform sparse global alignment (SfM)
+    print("Performing sparse global alignment...")
     
-    # Write points3D.txt
-    points3d_path_txt = output_folder / "points3D.txt"
-    with open(points3d_path_txt, 'w') as f:
-        f.write("# 3D point list with one line of data per point:\n")
-        f.write("#   POINT3D_ID, X, Y, Z, R, G, B, ERROR, TRACK[] as (IMAGE_ID, POINT2D_IDX)\n")
-        for pid, p in enumerate(points3d):
-            x, y, z = p
-            f.write(f"{pid+1} {x} {y} {z} 128 128 128 0.0\n")
+    # Debug: Check structures
+    print("\nDEBUG: Checking structures...")
+    print(f"Output type: {type(output)}")
+    print(f"Output keys: {list(output.keys()) if isinstance(output, dict) else 'not a dict'}")
     
-    # Collect output paths
-    output_files = {
-        "pts3d": str(points3d_path),
-        "cam2w": str(poses_path),
-        "intrinsics": str(intrinsics_path),
-        "depthmaps": str(output_folder / "depthmaps"),
-        "cameras_txt": str(cameras_path),
-        "images_txt": str(images_path),
-        "points3D_txt": str(points3d_path_txt)
+    # Check the structure of the output predictions
+    if 'pred1' in output:
+        print(f"pred1 type: {type(output['pred1'])}")
+        if isinstance(output['pred1'], dict):
+            print(f"pred1 keys (first 5): {list(output['pred1'].keys())[:5]}")
+        elif hasattr(output['pred1'], 'shape'):
+            print(f"pred1 shape: {output['pred1'].shape}")
+    
+    if 'view1' in output:
+        print(f"view1 type: {type(output['view1'])}")
+        if isinstance(output['view1'], dict):
+            print(f"view1 keys (first 5): {list(output['view1'].keys())[:5]}")
+    
+    print(f"Pairs type: {type(pairs)}, length: {len(pairs)}")
+    
+    # Build imgs_dict mapping idx to the actual image file path
+    # Since load_images doesn't preserve paths in the dict, we need to map them manually
+    imgs_dict = {}
+    for i, img in enumerate(images):
+        idx = img['idx']
+        # Use the actual file path from our list
+        if i < len(image_files):
+            imgs_dict[idx] = image_files[i]
+        else:
+            # Fallback to a string representation if something went wrong
+            imgs_dict[idx] = f"image_{idx}"
+    
+    print(f"imgs_dict sample (first 3): {[(k, os.path.basename(v)) for k, v in list(imgs_dict.items())[:3]]}")
+    
+    # Check what indices the pairs are using
+    if len(pairs) > 0:
+        first_pair = pairs[0]
+        print(f"First pair[0]['idx']: {first_pair[0]['idx']}, type: {type(first_pair[0]['idx'])}")
+        print(f"First pair[1]['idx']: {first_pair[1]['idx']}, type: {type(first_pair[1]['idx'])}")
+    
+    # For sparse_global_alignment, based on the error, it seems imgs should be a list of strings
+    # not a dict. Let's try passing a list of image paths instead
+    imgs_list = [imgs_dict[i] for i in sorted(imgs_dict.keys())]
+    print(f"imgs_list sample (first 3): {[os.path.basename(p) for p in imgs_list[:3]]}")
+    
+    # For sparse_global_alignment, we should pass the pairs list directly
+    # The inference output is already structured correctly
+    print(f"\nPassing {len(pairs)} pairs and {len(imgs_list)} images to sparse_global_alignment")
+
+    # Perform sparse global alignment
+    # Pass imgs_list (list of image paths) instead of dict
+    scene = sparse_global_alignment(
+        imgs_list,  # list of image file paths in order
+        pairs,      # original pairs list from make_pairs
+        output_folder,  
+        model,
+        lr1=lr,
+        niter1=niter,
+        schedule=schedule_fn,  # pass the function, not the string
+        device=device
+        # removed silent parameter - not supported
+    )
+    
+    # Save results
+    output_path = os.path.join(output_folder, "scene_reconstruction.npz")
+    print(f"Saving results to: {output_path}")
+    
+    # Extract image paths for saving
+    image_paths = []
+    for img in images:
+        if 'filepath' in img:
+            image_paths.append(img['filepath'])
+        elif 'img' in img:
+            image_paths.append(img['img'])
+        elif 'path' in img:
+            image_paths.append(img['path'])
+        else:
+            for v in img.values():
+                if isinstance(v, str):
+                    image_paths.append(v)
+                    break
+    
+    # Extract key results
+    # SparseGA object has attributes, not getter methods
+    results = {
+        'focals': scene.get_focals().cpu().numpy(),
+        'poses': scene.get_im_poses().cpu().numpy(),
+        'pts3d': scene.get_pts3d().cpu().numpy() if hasattr(scene, 'get_pts3d') else None,
+        'intrinsics': scene.intrinsics.cpu().numpy() if hasattr(scene, 'intrinsics') else None,
+        'num_images': len(images),
+        'image_paths': image_paths
     }
     
-    return output_files
+    # Save to npz file
+    np.savez(output_path, **{k: v for k, v in results.items() if v is not None and not isinstance(v, list)})
+    
+    # Also save image paths separately
+    with open(os.path.join(output_folder, "image_paths.txt"), 'w') as f:
+        for path in results['image_paths']:
+            f.write(f"{path}\n")
+    
+    print("Feature extraction and SfM complete!")
+    print(f"Results saved to: {output_folder}")
+    
+    return results
 
 
 if __name__ == "__main__":
+    # Corrected path to images
+    image_folder = "/home/studente/Documenti/luca_cicchese/CV_projectwork/data/gerrard-hall/images"
     results = extract_features_mast3r(
-        image_folder="data/gerrard-hall/images/",
+        image_folder=image_folder,
         output_folder="data/mast3r_reconstruction",
-        model_name="MASt3R_ViTLarge_BaseDecoder_512_catmlpdpt_metric"
+        model_name="naver/MASt3R_ViTLarge_BaseDecoder_512_catmlpdpt_metric",
+        scene_graph='swin',  # Use 'swin' instead of 'complete' for lower memory
+        image_size=512,
+        max_images=20  # Limit number of images, increase if you have more RAM
     )
     print("Output files:", results)
-        
