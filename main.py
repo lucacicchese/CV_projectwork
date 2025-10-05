@@ -1,7 +1,7 @@
 import metrics
 import colmap
 import mast3r
-import vggt
+import vggt_extract
 from splatting import gaussian_splatting
 
 if __name__ == "__main__":
@@ -15,7 +15,7 @@ if __name__ == "__main__":
     # Extract features using COLMAP, MAST3R, and VGGT
     colmap_poses, points_3d_colmap = colmap.extract_features(args.image_path, args.output_path)
     mast3r_poses, points_3d_mast3r = mast3r.extract_features(args.image_path, args.output_path)
-    vggt_poses, points_3d_vggt = vggt.extract_features(args.image_path, args.output_path)
+    vggt_poses, points_3d_vggt = vggt_extract.extract_features(args.image_path, args.output_path)
 
     # Compare poses
     print("Comparing poses")
