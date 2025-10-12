@@ -45,6 +45,11 @@ def extract_features_vggt(image_folder, output_folder, model_name="facebook/VGGT
     Returns:
         dict: Dictionary containing scene reconstruction results
     """
+
+    # Clear memory
+    if torch.cuda.is_available():
+        torch.cuda.empty_cache()
+        torch.cuda.synchronize()
     
     os.makedirs(output_folder, exist_ok=True)
     
@@ -215,7 +220,7 @@ if __name__ == "__main__":
         output_folder=output_folder,
         model_name="facebook/VGGT-1B",  
         device='cuda' if torch.cuda.is_available() else 'cpu',
-        max_images=50,  
+        max_images=100,  
         use_point_map=False  
     )
     
