@@ -217,7 +217,13 @@ def extract_features_vggt(image_folder, output_folder, model_name="facebook/VGGT
     print(f"  - Point maps shape: {point_map_np.shape}")
     print(f"  - Focal lengths shape: {focals.shape}")
     
-    return results
+    standard_output = {
+    "camera_poses": results["poses"],               # already np.ndarray [N, 4, 4]
+    "points3d": results["point_maps"].reshape(-1, 3),  # flatten (N,H,W,3) → (M,3)
+    "image_paths": results["image_paths"]
+    }
+    return standard_output
+
 
 
 def save_colmap_format(results, output_folder):
@@ -290,6 +296,7 @@ def save_colmap_format(results, output_folder):
     # Write to disk
     reconstruction.write(colmap_dir)
     print(f"COLMAP format saved to: {colmap_dir}")
+    
 
 
 if __name__ == "__main__":

@@ -2,6 +2,8 @@ import os
 import subprocess
 import pycolmap as colmap
 from PIL import Image
+import numpy as np
+
 
 def extract_features(image_folder, database_path):
     input_folder = image_folder
@@ -127,13 +129,30 @@ def extract_features(image_folder, database_path):
             'error': point.error
         })
     
-    return camera_poses, point_cloud
+    camera_pose_list = []
+    for pose in camera_poses.values():
+        R = np.array(pose['rotation_matrix'])
+        t = np.array(pose['translation']).reshape(3, 1)
+        T = np.eye(4)
+        T[:3, :3] = R
+        T[:3, 3:] = t
+        camera_pose_list.append(T)
+
+    points3d_array = np.array([p['xyz'] for p in point_cloud])
+
+    standard_output = {
+        "camera_poses": np.stack(camera_pose_list),
+        "points3d": points3d_array,
+        "image_paths": list(camera_poses.keys())
+    }
+
+    return standard_output
 
 if __name__ == "__main__":
-    poses, point_cloud = extract_features(
+    results = extract_features(
         image_folder="data/gerrard-hall/images/",
         database_path="data/colmap.db"
     )
     
-    print(f"Extracted {len(poses)} camera poses")
-    print(f"Extracted {len(point_cloud)} 3D points")
+    print(f"Extracted {len(results['camera_poses'])} camera poses")
+    print(f"Extracted {len(results['points3d'])} 3D points")

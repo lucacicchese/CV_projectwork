@@ -208,8 +208,14 @@ def extract_features_mast3r(image_folder, output_folder, model_name="naver/MASt3
     print("Feature extraction and SfM complete!")
     print(f"Results saved to: {output_folder}")
     
-    return results
+    standard_output = {
+    "camera_poses": results["poses"],       # [N, 4, 4]
+    "points3d": results["pts3d"],           # [M, 3]
+    "image_paths": results["image_paths"]
+    }
+    return standard_output
 
+    
 
 if __name__ == "__main__":
     # Corrected path to images
