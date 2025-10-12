@@ -16,14 +16,14 @@ if __name__ == "__main__":
         model_name="naver/MASt3R_ViTLarge_BaseDecoder_512_catmlpdpt_metric",
         scene_graph='swin',  # Use 'swin' instead of 'complete' for lower memory
         image_size=512,
-        max_images=20  # Limit number of images, increase if you have more RAM
+        max_images=50  # Limit number of images, increase if you have more RAM
     )
     vggt_results = vggt_extract.extract_features_vggt(
         image_folder="data/gerrard-hall/images/",
         output_folder="data/vggt_reconstruction",
         model_name="facebook/VGGT-1B",  # or "facebook/VGGT-1B-Commercial" for commercial use
         device='cuda' if torch.cuda.is_available() else 'cpu',
-        max_images=20,  # Limit number of images if needed
+        max_images=50,  # Limit number of images if needed
         use_point_map=False  # Use depth-based reconstruction (more accurate)
     )
 

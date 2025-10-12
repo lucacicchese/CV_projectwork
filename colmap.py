@@ -10,44 +10,10 @@ def extract_features(image_folder, database_path):
     resized_folder = f'{image_folder.rstrip("/")}_resized'
     output_path = "data/reconstruction"
     
-    # Check if reconstruction already exists
-    if os.path.exists(output_path) and os.listdir(output_path):
-        print("Reconstruction already exists, loading from cache...")
-        try:
-            reconstruction = colmap.Reconstruction(output_path)
-            # Skip to extracting poses and point cloud
-            camera_poses = {}
-            for image_id, image in reconstruction.images.items():
-                # Fix: cam_from_world is a method, call it to get the transform
-                cam_from_world = image.cam_from_world()
-                rotation = cam_from_world.rotation_matrix()
-                translation = cam_from_world.translation
-                
-                camera_poses[image.name] = {
-                    'image_id': image_id,
-                    'rotation_matrix': rotation.tolist(),
-                    'translation': translation.tolist(),
-                    'camera_center': (-rotation.T @ translation).tolist()
-                }
-            
-            point_cloud = []
-            for point_id, point in reconstruction.points3D.items():
-                point_cloud.append({
-                    'point_id': point_id,
-                    'xyz': point.xyz.tolist(),
-                    'color': point.rgb.tolist(),
-                    'error': point.error
-                })
-            
-            return camera_poses, point_cloud
-        except Exception as e:
-            print(f"Failed to load cached reconstruction: {e}")
-            print("Proceeding with fresh extraction...")
-    
-    # Proceed with fresh extraction
+
     os.makedirs(resized_folder, exist_ok=True)
     
-    # Check if images are already resized
+
     need_resize = True
     if os.path.exists(resized_folder):
         original_files = [f for f in os.listdir(input_folder) if f.lower().endswith(('.png', '.jpg', '.jpeg', '.tiff'))]
@@ -101,16 +67,14 @@ def extract_features(image_folder, database_path):
         output_path=output_path
     )
     
-    if not reconstructions:
-        raise RuntimeError("Incremental mapping failed - no reconstruction created")
     
     reconstruction = reconstructions[0]
     
     camera_poses = {}
     for image_id, image in reconstruction.images.items():
-        # Fix: cam_from_world returns a Rigid3d object
+        
         cam_from_world = image.cam_from_world()
-        rotation = cam_from_world.rotation.matrix()  # Use .rotation.matrix()
+        rotation = cam_from_world.rotation.matrix()  
         translation = cam_from_world.translation
         
         camera_poses[image.name] = {
@@ -125,7 +89,7 @@ def extract_features(image_folder, database_path):
         point_cloud.append({
             'point_id': point_id,
             'xyz': point.xyz.tolist(),
-            'color': point.color.tolist(),  # Use .color instead of .rgb
+            'color': point.color.tolist(),  
             'error': point.error
         })
     
@@ -140,12 +104,28 @@ def extract_features(image_folder, database_path):
 
     points3d_array = np.array([p['xyz'] for p in point_cloud])
 
+    rotations = []
+    translations = []
+    for pose in camera_poses.values():
+        R = np.array(pose['rotation_matrix'])
+        t = np.array(pose['translation'])
+        rotations.append(R)
+        translations.append(t)
+
+    camera_poses_array = np.stack([
+        np.block([
+            [R, t.reshape(3, 1)],
+            [np.zeros((1, 3)), np.ones((1, 1))]
+        ]) for R, t in zip(rotations, translations)
+    ])
+
     standard_output = {
-        "camera_poses": np.stack(camera_pose_list),
+        "camera_poses": camera_poses_array,
         "points3d": points3d_array,
+        "rotations": np.stack(rotations),
+        "translations": np.stack(translations),
         "image_paths": list(camera_poses.keys())
     }
-
     return standard_output
 
 if __name__ == "__main__":
