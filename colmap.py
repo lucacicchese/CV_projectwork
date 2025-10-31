@@ -66,9 +66,13 @@ def extract_features(image_folder, database_path):
         image_path=resized_folder,
         output_path=output_path
     )
+
+    #reconstructions[0].write(output_path)
+    colmap.Reconstruction.write_text(reconstructions[0], output_path)
     
     
     reconstruction = reconstructions[0]
+
     
     camera_poses = {}
     for image_id, image in reconstruction.images.items():
