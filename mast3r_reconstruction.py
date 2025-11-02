@@ -21,9 +21,9 @@ if not mast3r_path.exists():
 
 sys.path.insert(0, str(mast3r_path))
 
-def mast3r_reconstruction():
+def mast3r_reconstruction(dataset_name="gerrard-hall"):
     args = {
-        "scene_dir": "data/gerrard-hall/",
+        "scene_dir": f"data/{dataset_name}/",
         "max_images": 40,
         "model_name": "MASt3R_ViTLarge_BaseDecoder_512_catmlpdpt_metric",
         "retrieval_model": "../mast3r/checkpoints/MASt3R_ViTLarge_BaseDecoder_512_catmlpdpt_metric_retrieval_trainingfree.pth",

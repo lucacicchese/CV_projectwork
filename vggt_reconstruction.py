@@ -23,11 +23,11 @@ else:
 import subprocess
 from pathlib import Path
 
-def vggt_reconstruction():
+def vggt_reconstruction(dataset_name):
     args = {
-        "scene_dir": "data/gerrard-hall/",
+        "scene_dir": f"data/{dataset_name}/",
         "use_ba": False,
-        # add/remove any others as needed
+        
     }
 
     new_folder = split_large_image_folder(args["scene_dir"], "vggt", max_images=40)
@@ -50,5 +50,5 @@ def vggt_reconstruction():
 
 
 if __name__ == "__main__":
-    vggt_reconstruction()
+    vggt_reconstruction("gerrard-hall")
     
