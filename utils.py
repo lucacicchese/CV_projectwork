@@ -75,7 +75,7 @@ import random
 from pathlib import Path
 import math
 
-def split_dataset(input_folder, dataset_name=None, split_size=40, min_overlap=5, seed=None):
+def split_dataset(input_folder, out_folder, dataset_name=None, split_size=40, min_overlap=5, seed=None):
     # Set random seed if provided
     if seed is not None:
         random.seed(seed)
@@ -102,7 +102,7 @@ def split_dataset(input_folder, dataset_name=None, split_size=40, min_overlap=5,
         dataset_name = input_path.name
     
     # Create output directory
-    output_root = Path(f"{dataset_name}_split")
+    output_root = Path(out_folder)
     output_root.mkdir(exist_ok=True)
     
     # Shuffle the full list of images
