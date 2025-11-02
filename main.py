@@ -8,7 +8,7 @@ if __name__ == "__main__":
 
     # Extract features using COLMAP, MAST3R, and VGGT
     print("Starting reconstructions...")
-    colmap_reconstruction()
+    colmap_reconstruction(image_folder="data/gerrard-hall/images/", database_path="data/colmap.db")
     mast3r_reconstruction()
     vggt_reconstruction()
 
