@@ -130,13 +130,12 @@ def extract_features(image_folder, database_path):
         "translations": np.stack(translations),
         "image_paths": list(camera_poses.keys())
     }
-    return standard_output
+    return 
 
 if __name__ == "__main__":
-    results = extract_features(
+    extract_features(
         image_folder="data/gerrard-hall/images/",
         database_path="data/colmap.db"
     )
     
-    print(f"Extracted {len(results['camera_poses'])} camera poses")
-    print(f"Extracted {len(results['points3d'])} 3D points")
+    print(f"Colmap reconstruction completed.")
