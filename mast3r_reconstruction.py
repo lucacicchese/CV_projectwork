@@ -5,6 +5,7 @@ import subprocess
 import shutil
 import random
 import warnings
+from utils import split_large_image_folder
 
 warnings.filterwarnings("ignore", category=FutureWarning)
 
@@ -21,32 +22,6 @@ if not mast3r_path.exists():
 sys.path.insert(0, str(mast3r_path))
 
 
-def split_large_image_folder(src_folder, max_images: int = 40):
-    src = Path(src_folder)
-    img_dir = src / "images"
-
-    if not img_dir.is_dir():
-        raise ValueError(f"'images' subfolder not found in {src}")
-
-    image_files = [
-        f for f in img_dir.iterdir()
-        if f.is_file() and f.suffix.lower() in {".jpg", ".jpeg", ".png", ".bmp", ".tiff"}
-    ]
-
-    if len(image_files) <= max_images:
-        return None
-
-    selected = random.sample(image_files, max_images)
-    new_folder = src.parent / f"{src.name}_subset"
-    new_img_dir = new_folder / "images"
-    new_img_dir.mkdir(parents=True, exist_ok=True)
-
-    for img in selected:
-        shutil.copy2(img, new_img_dir / img.name)
-
-    print(f"Created subset with {max_images} images: {new_folder}")
-    return new_folder
-
 
 if __name__ == "__main__":
     args = {
@@ -59,7 +34,7 @@ if __name__ == "__main__":
     }
 
     # Step 1: Split large folder
-    new_folder = split_large_image_folder(args["scene_dir"], max_images=args["max_images"])
+    new_folder = split_large_image_folder(args["scene_dir"], "mast3r", max_images=args["max_images"])
     if new_folder is None:
         subset_dir = Path(args["scene_dir"]) / "images"
         print(f"No split needed. Using: {subset_dir}")
@@ -78,10 +53,10 @@ if __name__ == "__main__":
         print(f"Removing existing COLMAP database: {colmap_db_path}")
         colmap_db_path.unlink()  # Delete it
 
-    # Step 3: Command 1 - Make pairs
+    # Step 3: Make pairs
     pairs_file = output_path / "pairs.txt"  # Save in output dir for clarity
 
-    cmd1 = [
+    make_pairs = [
         "python", str(mast3r_path / "make_pairs.py"),
         "--dir", image_dir_str,
         "--output", str(pairs_file),
@@ -91,14 +66,14 @@ if __name__ == "__main__":
     ]
 
     print(f"\nRunning pair generation...")
-    print(" ".join(cmd1))
-    result1 = subprocess.run(cmd1, check=True, cwd=current_dir)
+    print(" ".join(make_pairs))
+    result1 = subprocess.run(make_pairs, check=True, cwd=current_dir)
     if result1.returncode != 0:
         print("Failed to generate pairs.")
         sys.exit(1)
 
     # Step 4: Command 2 - Run MAST3R mapping
-    cmd2 = [
+    mapping = [
         "python", str(mast3r_path / "kapture_mast3r_mapping.py"),
         "--dir", image_dir_str,
         "--pairsfile_path", str(pairs_file),
@@ -107,8 +82,8 @@ if __name__ == "__main__":
     ]
 
     print(f"\nRunning MAST3R mapping...")
-    print(" ".join(cmd2))
-    result2 = subprocess.run(cmd2, check=True, cwd=current_dir)
+    print(" ".join(mapping))
+    result2 = subprocess.run(mapping, check=True, cwd=current_dir)
     if result2.returncode != 0:
         print("MAST3R mapping failed.")
         sys.exit(1)

@@ -1,0 +1,28 @@
+To merge colmap reconstructions
+
+# Split your 500-image folder into 4×125-image chunks
+python demo_colmap.py --scene_dir chunk1 --use_ba False ...
+python demo_colmap.py --scene_dir chunk2 --use_ba False ...
+
+# Merge databases
+colmap database_merger \
+    --database_path1 chunk1/colmap/database.db \
+    --database_path2 chunk2/colmap/database.db \
+    --merged_database_path merged.db
+
+# Re-triangulate
+colmap point_triangulator \
+    --database_path merged.db \
+    --image_path /path/to/all/images \
+    --input_path  /path/to/vggt_output/colmap/sparse/0 \
+    --output_path /path/to/merged/sparse/0
+
+
+
+
+For vggt 
+
+STEP 2
+colmap model_converter --input_path data/gerrard-hall_vggt/sparse --output_path ./vggt_output/colmap/sparse/0 --output_type BIN
+
+STEP 3

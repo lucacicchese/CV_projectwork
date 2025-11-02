@@ -1,7 +1,7 @@
 import metrics
-import colmap
-import mast3r_extract
-import vggt_extract
+import colmap_reconstruction
+import mast3r_reconstruction
+import vggt_reconstruction
 import torch
 
 if __name__ == "__main__":
@@ -9,8 +9,8 @@ if __name__ == "__main__":
 
 
     # Extract features using COLMAP, MAST3R, and VGGT
-    colmap_results = colmap.extract_features(image_folder="data/gerrard-hall/images/",database_path="data/colmap.db")
-    mast3r_results = mast3r_extract.extract_features_mast3r(
+    colmap_results = colmap_reconstruction.extract_features(image_folder="data/gerrard-hall/images/",database_path="data/colmap.db")
+    mast3r_results = mast3r_reconstruction.extract_features_mast3r(
         image_folder="data/gerrard-hall/images/",
         output_folder="data/mast3r_reconstruction",
         model_name="naver/MASt3R_ViTLarge_BaseDecoder_512_catmlpdpt_metric",
@@ -18,7 +18,7 @@ if __name__ == "__main__":
         image_size=512,
         max_images=100  # Limit number of images, increase if you have more RAM
     )
-    vggt_results = vggt_extract.extract_features_vggt(
+    vggt_results = vggt_reconstruction.extract_features_vggt(
         image_folder="data/gerrard-hall/images/",
         output_folder="data/vggt_reconstruction",
         model_name="facebook/VGGT-1B",  # or "facebook/VGGT-1B-Commercial" for commercial use
