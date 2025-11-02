@@ -5,7 +5,7 @@ from PIL import Image
 import numpy as np
 
 
-def extract_features(image_folder, database_path):
+def colmap_reconstruction(image_folder, database_path):
     input_folder = image_folder
     resized_folder = f'{image_folder.rstrip("/")}_resized'
     output_path = "data/reconstruction"
@@ -72,7 +72,7 @@ def extract_features(image_folder, database_path):
     return 
 
 if __name__ == "__main__":
-    extract_features(
+    colmap_reconstruction(
         image_folder="data/gerrard-hall/images/",
         database_path="data/colmap.db"
     )

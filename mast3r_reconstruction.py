@@ -21,9 +21,7 @@ if not mast3r_path.exists():
 
 sys.path.insert(0, str(mast3r_path))
 
-
-
-if __name__ == "__main__":
+def mast3r_reconstruction():
     args = {
         "scene_dir": "data/gerrard-hall/",
         "max_images": 40,
@@ -89,3 +87,9 @@ if __name__ == "__main__":
         sys.exit(1)
 
     print(f"\nSuccess! Reconstruction saved to: {output_path}")
+    
+
+
+
+if __name__ == "__main__":
+    mast3r_reconstruction()
