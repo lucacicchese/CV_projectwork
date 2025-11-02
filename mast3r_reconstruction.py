@@ -5,7 +5,7 @@ import subprocess
 import shutil
 import random
 import warnings
-from utils import split_large_image_folder
+from utils import split_dataset
 
 warnings.filterwarnings("ignore", category=FutureWarning)
 
