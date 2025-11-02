@@ -141,6 +141,7 @@ def mast3r_full_dataset(
     # Call your split_dataset function
     split_dataset(
         input_folder=str(input_path),
+        out_folder=str(temp_splits_dir),
         dataset_name=dataset_name,
         split_size=split_size,
         min_overlap=min_overlap,
