@@ -18,9 +18,13 @@ colmap point_triangulator \
     --output_path /path/to/merged/sparse/0
 
 
+colmap model_merger --input_path1 mast3r_full_recon_gerrard/per_split_reconstructions/split_1/reconstruction/0/ --input_path2 mast3r_full_recon_gerrard/per_split_reconstructions/split_2/reconstruction/0/ --output_path mast3r_full_recon_gerrard
+
+colmap model_merger --input_path1 mast3r_full_recon_gerrard/merged_reconstruction/split_1 --input_path2 mast3r_full_recon_gerrard/merged_reconstruction/split_2 --output_path mast3r_full_recon_gerrard/merged_reconstruction/merge/
 
 
-For vggt 
+For vggt  colmap model_merger --input_path1 data/gerrard-hall/mast3r_multi/reconstructions/0/reconstruction/0/ --input_path2 data/gerrard-hall/mast3r_multi/reconstructions/1/reconstruction/0/ --output_path data/gerrard-hall/mast3r_multi/merged_reconstruction_1/
+
 
 STEP 2
 colmap model_converter --input_path data/gerrard-hall_vggt/sparse --output_path ./vggt_output/colmap/sparse/0 --output_type BIN

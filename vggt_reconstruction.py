@@ -5,6 +5,7 @@ import torch
 import numpy as np
 import random
 import warnings
+import shutil
 from utils import split_large_image_folder
 warnings.filterwarnings("ignore", category=FutureWarning)
 
@@ -23,25 +24,28 @@ else:
 import subprocess
 from pathlib import Path
 
-def vggt_reconstruction(dataset_name):
+def vggt_reconstruction(dataset_path, output_dir):
     args = {
-        "scene_dir": f"data/{dataset_name}/",
+        "scene_dir": f"./{dataset_path}/",
         "use_ba": False,
         
     }
+    images_dir = os.path.join(dataset_path, "images")
+    if not os.path.exists(images_dir):
+        os.makedirs(images_dir)
+        for f in os.listdir(dataset_path):
+            p = os.path.join(dataset_path, f)
+            if os.path.isfile(p):
+                shutil.move(p, os.path.join(images_dir, f))
 
-    new_folder = split_large_image_folder(args["scene_dir"], "vggt", max_images=40)
-    if new_folder is None:
-        new_folder = args["scene_dir"]
+    #new_folder = split_large_image_folder(args["scene_dir"], "vggt", max_images=40)
+    #if new_folder is None:
+    #    new_folder = args["scene_dir"]
 
-    # ---- Build CLI string ----
-    cli = [f"--{k.replace('_', '-')} {v}" if not isinstance(v, bool) else f"--{k.replace('_', '-')}" if v else ""
-        for k, v in args.items()]
-    cli = " ".join([x for x in cli if x])  # drop empty
 
     #cmd = f"python ../vggt/demo_colmap.py --scene-dir {args['scene_dir']}"
 
-    cmd = f"python ../vggt/demo_colmap.py --scene_dir={new_folder} --max_query_pts=1024 --query_frame_num=5"
+    cmd = f"python ../vggt/demo_colmap.py --scene_dir={dataset_path} --max_query_pts=1024 --query_frame_num=5"
     # ---- Run ----
     print(f"Running: {cmd}")
     subprocess.run(cmd, shell=True, check=True)
@@ -50,5 +54,5 @@ def vggt_reconstruction(dataset_name):
 
 
 if __name__ == "__main__":
-    vggt_reconstruction("gerrard-hall")
+    vggt_reconstruction("data/gerrard-hall/")
     

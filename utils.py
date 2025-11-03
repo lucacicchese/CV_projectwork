@@ -2,6 +2,14 @@ import os
 import shutil
 import random
 from pathlib import Path
+import sys
+
+def extract_common_images(path1: str, path2: str):
+    p1 = Path(path1) / "images.txt"
+    p2 = Path(path2) / "images.txt"
+    s1 = {l.split()[9] for l in p1.read_text().splitlines()[4:] if l and not l.startswith("#")}
+    s2 = {l.split()[9] for l in p2.read_text().splitlines()[4:] if l and not l.startswith("#")}
+    open("common_images.txt","w").write("\n".join(sorted(s1 & s2)) + "\n")
 
 def split_large_image_folder(src_folder, model_name, max_images: int = 40):
     src = Path(src_folder)
@@ -75,7 +83,7 @@ import random
 from pathlib import Path
 import math
 
-def split_dataset(input_folder, out_folder, dataset_name=None, split_size=40, min_overlap=5, seed=None):
+def split_dataset(input_folder, out_folder, dataset_name=None, split_size=40, min_overlap=10,  seed=None):
     # Set random seed if provided
     if seed is not None:
         random.seed(seed)
@@ -138,7 +146,7 @@ def split_dataset(input_folder, out_folder, dataset_name=None, split_size=40, mi
     
     # Create split folders and copy images
     for i, split_images in enumerate(splits, 1):
-        split_folder = output_root / f"split_{i}"
+        split_folder = output_root / f"{i}"
         split_folder.mkdir(exist_ok=True)
         
         print(f"Creating {split_folder} with {len(split_images)} images...")
@@ -160,6 +168,69 @@ def split_dataset(input_folder, out_folder, dataset_name=None, split_size=40, mi
         print(f"Split {i} and {i+1} overlap: {len(overlap)} images")
     
     return output_root
+
+import os
+import shutil
+import random
+from pathlib import Path
+
+def split_dataset_no_overlap(input_folder, out_folder, dataset_name=None, split_size=40, seed=None):
+    """
+    Splits files from input_folder into non-overlapping subfolders in out_folder.
+    
+    Args:
+        input_folder (str or Path): Path to the folder containing original files.
+        out_folder (str or Path): Path to the output directory where splits will be created.
+        dataset_name (str, optional): If provided, creates a subfolder with this name.
+        split_size (int): Maximum number of files per split folder (default: 40).
+        seed (int, optional): Random seed for reproducibility.
+    
+    Creates:
+        out_folder/[dataset_name]/split_1, split_2, ... each with <= split_size files.
+        If dataset_name is None, splits are created directly in out_folder.
+    """
+    input_path = Path(input_folder)
+    out_path = Path(out_folder)
+    
+    # Set random seed if provided
+    if seed is not None:
+        random.seed(seed)
+    
+    # Validate input folder
+    if not input_path.exists() or not input_path.is_dir():
+        raise ValueError(f"Input folder does not exist or is not a directory: {input_path}")
+    
+    # Get all files in the input folder (non-recursive)
+    files = [f for f in input_path.iterdir() if f.is_file()]
+    
+    if not files:
+        print("Warning: No files found in input folder.")
+        return
+    
+    # Shuffle files randomly
+    random.shuffle(files)
+    
+    # Determine base output directory
+    base_out = out_path / dataset_name if dataset_name else out_path
+    base_out.mkdir(parents=True, exist_ok=True)
+    
+    # Split files into chunks
+    split_idx = 1
+    for i in range(0, len(files), split_size):
+        chunk = files[i:i + split_size]
+        
+        # Create split folder
+        split_folder = base_out / f"split_{split_idx}"
+        split_folder.mkdir(exist_ok=True)
+        
+        # Copy files to split folder
+        for file_path in chunk:
+            shutil.copy2(file_path, split_folder / file_path.name)
+        
+        print(f"Created {split_folder} with {len(chunk)} files.")
+        split_idx += 1
+    
+    print(f"\nSplitting complete: {split_idx - 1} split(s) created in {base_out}")
 
 
 if __name__ == "__main__":
