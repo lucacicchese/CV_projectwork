@@ -16,7 +16,7 @@ if __name__ == "__main__":
     if not (os.path.exists(output_dir) and os.path.isdir(output_dir)):
         print("Starting reconstructions...")
         colmap_reconstruction(image_folder=f"data/{dataset_name}/images/", database_path="data/colmap.db")
-        mast3r_reconstruction(dataset_name, mast3r_output_dir)
+        mast3r_reconstruction(f"data/{dataset_name}/images/", mast3r_output_dir)
         vggt_reconstruction(dataset_name)
 
         print("All reconstructions completed.")

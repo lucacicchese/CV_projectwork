@@ -16,8 +16,8 @@ def multi_stage_reconstruction(dataset_folder, output_folder, model_name):
         input_folder=dataset_folder,
         out_folder=splits_dir
     )
-    
-    # Step 2: RUN CORRECT RECONSTRUCTION
+
+    # Step 2: RUN RECONSTRUCTION
     if not os.path.exists(splits_dir):
         raise RuntimeError(f"Splits directory not found: {splits_dir}")
     
@@ -63,7 +63,6 @@ def multi_stage_reconstruction(dataset_folder, output_folder, model_name):
     
     # Step 3 & 4: COMPUTE COMMON IMAGES AND MERGE MODELS INCREMENTALLY
     if len(split_paths) < 2:
-        # Only one split: just copy it to final
         final_recon_path = f"{output_folder}/final_reconstruction"
         os.makedirs(final_recon_path, exist_ok=True)
         src = f"{reconstructions_dir}/0"
@@ -95,18 +94,31 @@ def multi_stage_reconstruction(dataset_folder, output_folder, model_name):
         with open(common_txt_path, 'w') as f:
             for fname in common_files:
                 f.write(f"{fname}\n")
+
+        # Align
+        os.makedirs(f"{output_folder}/aligned_reconstruction_{i}", exist_ok=True)
+        aligned_model = f"{output_folder}/aligned_reconstruction_{i}"
+
+        align = [
+        "colmap", "model_aligner",
+        "--input_path", current_recon_path,
+        "--output_path", aligned_model,
+        "--ref_images_path", common_txt_path,
+        "--ref_model_path", split_paths[0],
+        "--alignment_max_error", "5"
+        ]
         
         # Merge
         merged_recon_path = f"{output_folder}/merged_reconstruction_{i}"
         os.makedirs(merged_recon_path, exist_ok=True)
         
-        cmd = [
+        merge = [
             "colmap", "models_merger",
             "--input_path1", current_recon_path,
-            "--input_path2", next_recon_path,
+            "--input_path2", aligned_model,
             "--output_path", merged_recon_path
         ]
-        subprocess.run(cmd, check=True)
+        subprocess.run(merge, check=True)
         
         # Update current state
         current_recon_path = merged_recon_path
