@@ -1,5 +1,6 @@
 import os
 import subprocess
+from model_merger import merge_all_colmap_models
 from utils import split_dataset
 from mast3r_reconstruction import mast3r_reconstruction
 from vggt_reconstruction import vggt_reconstruction
@@ -60,77 +61,10 @@ def multi_stage_reconstruction(dataset_folder, output_folder, model_name):
                     for f in os.listdir(src):
                         shutil.move(os.path.join(src, f), os.path.join(dst, f))
 
-    
-    # Step 3 & 4: COMPUTE COMMON IMAGES AND MERGE MODELS INCREMENTALLY
-    if len(split_paths) < 2:
-        final_recon_path = f"{output_folder}/final_reconstruction"
-        os.makedirs(final_recon_path, exist_ok=True)
-        src = f"{reconstructions_dir}/0"
-        if os.path.exists(final_recon_path):
-            shutil.rmtree(final_recon_path)
-        if os.path.exists(src):
-            shutil.copytree(src, final_recon_path)
-        return
-    
-    # Start with first reconstruction
-    current_recon_path = f"{reconstructions_dir}/0"
-    if not os.path.exists(current_recon_path):
-        raise RuntimeError(f"Reconstruction not found: {current_recon_path}")
-    
-    current_split_images = set(os.listdir(split_paths[0]))
-    
-    for i in range(1, len(split_paths)):
-        next_split_path = split_paths[i]
-        next_recon_path = f"{reconstructions_dir}/{i}"
-        next_split_images = set(os.listdir(next_split_path))
-        
-        if not os.path.exists(next_recon_path):
-            raise RuntimeError(f"Reconstruction not found: {next_recon_path}")
-        
-        # Compute common images
-        common_files = sorted(current_split_images.intersection(next_split_images))
-        
-        common_txt_path = f"{output_folder}/common_images_{i}.txt"
-        with open(common_txt_path, 'w') as f:
-            for fname in common_files:
-                f.write(f"{fname}\n")
-
-        # Align
-        os.makedirs(f"{output_folder}/aligned_reconstruction_{i}", exist_ok=True)
-        aligned_model = f"{output_folder}/aligned_reconstruction_{i}"
-
-        align = [
-        "colmap", "model_aligner",
-        "--input_path", current_recon_path,
-        "--output_path", aligned_model,
-        "--ref_images_path", common_txt_path,
-        "--ref_model_path", split_paths[0],
-        "--alignment_max_error", "5"
-        ]
-        
-        # Merge
-        merged_recon_path = f"{output_folder}/merged_reconstruction_{i}"
-        os.makedirs(merged_recon_path, exist_ok=True)
-        
-        merge = [
-            "colmap", "models_merger",
-            "--input_path1", current_recon_path,
-            "--input_path2", aligned_model,
-            "--output_path", merged_recon_path
-        ]
-        subprocess.run(merge, check=True)
-        
-        # Update current state
-        current_recon_path = merged_recon_path
-        current_split_images = current_split_images.union(next_split_images)
-    
-    # Final output
-    final_recon_path = f"{output_folder}/final_reconstruction"
-    os.makedirs(final_recon_path, exist_ok=True)
-    if os.path.exists(final_recon_path):
-        shutil.rmtree(final_recon_path)
-    if os.path.exists(current_recon_path):
-        shutil.copytree(current_recon_path, final_recon_path)
+    # Step 3: MERGE RECONSTRUCTIONS
+    merge_all_colmap_models(
+        root_folder=reconstructions_dir,
+        final_output_dir=f"{output_folder}/final_reconstruction")
 
 if __name__ == "__main__":
     model_name = "mast3r"  # or "vggt"
