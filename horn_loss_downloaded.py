@@ -436,7 +436,7 @@ def score(
     strict_cf=-1,
     skip_top_thresholds=2,
     to_dec=3,
-    verbose=False,
+    verbose=True,
 ):
     '''compute the score: <gt_csv>/<user_csv> - gt/submission csv file;
     <combo_mode> - how to mix mAA_score and clusterness score ["harmonic", "geometric", "arithmetic"];
@@ -771,3 +771,17 @@ def score(
     scene_score_dict = {dataset: score * 100 for dataset, score in zip(gt_data, stat_score)}
     scene_score_dict_mask_a = None if mask_csv is None else {dataset: score * 100 for dataset, score in zip(gt_data, stat_score_mask_a)}
     scene_score_dict_mask_b = None if mask_csv is None else {dataset: score * 100 for dataset, score in zip(gt_data, stat_score_mask_b)}
+
+
+if __name__ == '__main__':
+    
+
+    sc = score(
+    gt_csv="gt_poses_mast3r.csv",
+    user_csv="user_poses_mast3r.csv",
+    thresholds_csv="thresholds.csv",
+    skip_top_thresholds=0,  # Don't skip any thresholds
+    to_dec=0  # Don't require minimum correct
+)
+
+    print(f"Final score: {sc}%")
