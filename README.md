@@ -10,8 +10,7 @@
 
 |  Feature   | DONE  | WIP |
 |-----|---|---|
-| My indoor dataset |  | 🔁 |
-| My outdoor dataset |  | 🔁 |
+| My dataset | ✅ | |
 | Extract poses colmap | ✅ |  |
 | Extract 3d points colmap | ✅ |  |
 | Extract poses mast3r | ✅ |  |
@@ -45,11 +44,7 @@ The other requirements to run the code can be installed by running the requireme
 To run the full pipeline just run the main file contained in the CV_projectwork folder:
 `python main.py`
 
-## Datasets
-
-### Indoor dataset
-
-### Outdoor dataset
+## Dataset
 
 ## Implementation
 

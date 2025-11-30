@@ -1,189 +1,209 @@
 import numpy as np
-import struct
-from scipy.spatial import KDTree
+import csv
+from pathlib import Path
+from scipy.spatial.transform import Rotation
 
-def read_colmap_images_bin(path):
-    images_file = path + "/images.bin"
-    images = {}
-    
-    with open(images_file, 'rb') as f:
-        num_images = struct.unpack('Q', f.read(8))[0]
-        
-        for i in range(num_images):
-            image_id = struct.unpack('I', f.read(4))[0]
-            qw, qx, qy, qz = struct.unpack('dddd', f.read(32))
-            tx, ty, tz = struct.unpack('ddd', f.read(24))
-            camera_id = struct.unpack('I', f.read(4))[0]
-            
-            name_len = 0
-            name_bytes = b''
-            while True:
-                char = f.read(1)
-                if char == b'\x00':
-                    break
-                name_bytes += char
-            name = name_bytes.decode('utf-8')
-            
-            num_points2d = struct.unpack('Q', f.read(8))[0]
-            points2d = []
-            for j in range(num_points2d):
-                x, y = struct.unpack('dd', f.read(16))
-                point3d_id = struct.unpack('Q', f.read(8))[0]
-                points2d.append((x, y, point3d_id))
-            
-            images[name] = {
-                'id': image_id,
-                'points2d': points2d
-            }
-    
-    return images
 
-def read_colmap_points_bin(path):
-    points3d_file = path + "/points3D.bin"
-    points = {}
+def read_csv(filename, header=True):
+    data = {}
+    label_idx = {}    
     
-    with open(points3d_file, 'rb') as f:
-        num_points = struct.unpack('Q', f.read(8))[0]
-        
-        for i in range(num_points):
-            point_id = struct.unpack('Q', f.read(8))[0]
-            x, y, z = struct.unpack('ddd', f.read(24))
-            r, g, b = struct.unpack('BBB', f.read(3))
-            error = struct.unpack('d', f.read(8))[0]
-            track_length = struct.unpack('Q', f.read(8))[0]
-            
-            for j in range(track_length):
-                image_id = struct.unpack('I', f.read(4))[0]
-                point2d_idx = struct.unpack('I', f.read(4))[0]
-            
-            points[point_id] = np.array([x, y, z])
-    
-    return points
-
-def get_common_points(path1, path2):
-    images1 = read_colmap_images_bin(path1)
-    images2 = read_colmap_images_bin(path2)
-    points1 = read_colmap_points_bin(path1)
-    points2 = read_colmap_points_bin(path2)
-    
-    common_image_names = set(images1.keys()) & set(images2.keys())
-    
-    point_matches = {}
-    
-    for img_name in common_image_names:
-        points2d_1 = images1[img_name]['points2d']
-        points2d_2 = images2[img_name]['points2d']
-        
-        for i, (x1, y1, p3d_id1) in enumerate(points2d_1):
-            if p3d_id1 == -1:
+    with open(filename, newline='\n') as csvfile:    
+        csv_lines = csv.reader(csvfile, delimiter=',')
+        for row in csv_lines:
+            if header:
+                header = False
+                for i, name in enumerate(row): label_idx[name] = i
                 continue
-            if i >= len(points2d_2):
-                continue
-            x2, y2, p3d_id2 = points2d_2[i]
-            
-            if p3d_id2 != -1 and p3d_id1 in points1 and p3d_id2 in points2:
-                if p3d_id1 not in point_matches:
-                    point_matches[p3d_id1] = []
-                point_matches[p3d_id1].append(p3d_id2)
-    
-    matched_pairs = []
-    for p1_id, p2_ids in point_matches.items():
-        p2_id = max(set(p2_ids), key=p2_ids.count)
-        matched_pairs.append((points1[p1_id], points2[p2_id]))
-    
-    if len(matched_pairs) == 0:
-        return None, None
-    
-    pts1 = np.array([p[0] for p in matched_pairs])
-    pts2 = np.array([p[1] for p in matched_pairs])
-    
-    return pts1, pts2
+            dataset = row[label_idx['dataset']]
+            scene = row[label_idx['scene']]
+            image = row[label_idx['image']]
+            R = np.array([float(x) for x in (row[label_idx['rotation_matrix']].split(';'))]).reshape(3,3)
+            t = np.array([float(x) for x in (row[label_idx['translation_vector']].split(';'))]).reshape(3)
+            c = -R.T @ t
 
-def align_point_clouds_with_scale(src, dst):
-    centroid_src = np.mean(src, axis=0)
-    centroid_dst = np.mean(dst, axis=0)
+            if not (dataset in data):
+                data[dataset] = {}            
+            if not (scene in data[dataset]):
+                data[dataset][scene] = {}
+            data[dataset][scene][image] = {'R': R, 't': t, 'c': c}
+    return data
+
+
+# MODIFIED: ICP implementation instead of Horn's method
+def icp_alignment(source_points, target_points, max_iterations=50, tolerance=1e-6):
+    """
+    Align source points to target points using Iterative Closest Point (ICP).
+    Returns transformation matrix (4x4) and final error.
+    source_points, target_points: shape (3, N)
+    """
+    src = source_points.copy()
+    tgt = target_points.copy()
     
-    src_centered = src - centroid_src
-    dst_centered = dst - centroid_dst
+    prev_error = 0
+    R_final = np.eye(3)
+    t_final = np.zeros((3, 1))
     
-    scale = np.sqrt(np.sum(dst_centered ** 2) / np.sum(src_centered ** 2))
-    src_centered *= scale
-    
-    H = src_centered.T @ dst_centered
-    U, S, Vt = np.linalg.svd(H)
-    R = Vt.T @ U.T
-    
-    if np.linalg.det(R) < 0:
-        Vt[-1, :] *= -1
+    for i in range(max_iterations):
+        distances = np.sum((src[:, :, None] - tgt[:, None, :])**2, axis=0)
+        indices = np.argmin(distances, axis=1)
+        matched_tgt = tgt[:, indices]
+        
+        src_mean = src.mean(axis=1, keepdims=True)
+        tgt_mean = matched_tgt.mean(axis=1, keepdims=True)
+        
+        src_centered = src - src_mean
+        tgt_centered = matched_tgt - tgt_mean
+        
+        H = src_centered @ tgt_centered.T
+        U, S, Vt = np.linalg.svd(H)
         R = Vt.T @ U.T
-    
-    t = centroid_dst - scale * R @ centroid_src
-    
-    return R, t, scale
-
-def icp_align(src, dst, max_iterations=50, tolerance=1e-6):
-    R = np.eye(3)
-    t = np.zeros(3)
-    scale = 1.0
-    
-    src_transformed = src.copy()
-    
-    for iteration in range(max_iterations):
-        tree = KDTree(dst)
-        distances, indices = tree.query(src_transformed)
         
-        matched_dst = dst[indices]
+        if np.linalg.det(R) < 0:
+            Vt[-1, :] *= -1
+            R = Vt.T @ U.T
         
-        R_iter, t_iter, scale_iter = align_point_clouds_with_scale(src_transformed, matched_dst)
+        t = tgt_mean - R @ src_mean
         
-        src_transformed = scale_iter * (R_iter @ src_transformed.T).T + t_iter
+        R_final = R @ R_final
+        t_final = R @ t_final + t
         
-        R = R_iter @ R
-        t = scale_iter * R_iter @ t + t_iter
-        scale = scale * scale_iter
+        src = R @ src + t
         
-        mean_error = np.mean(distances)
-        if iteration > 0 and abs(prev_error - mean_error) < tolerance:
+        error = np.mean(np.sum((src - matched_tgt)**2, axis=0))
+        
+        if abs(prev_error - error) < tolerance:
             break
-        prev_error = mean_error
+        prev_error = error
     
-    return R, t, scale
+    T = np.eye(4)
+    T[:3, :3] = R_final
+    T[:3, 3] = t_final.squeeze()
+    
+    return T, np.sqrt(error)
 
-def icp_loss(R, t, scale, src, dst):
-    transformed = scale * (R @ src.T).T + t
-    tree = KDTree(dst)
-    distances, indices = tree.query(transformed)
-    loss = np.sum(distances ** 2)
-    return loss
 
-def compare_colmap_reconstructions_icp(path1, path2, max_iterations=50):
-    points1, points2 = get_common_points(path1, path2)
+# MODIFIED: Compute alignment and errors using ICP instead of Horn
+def evaluate_with_icp(gt_data, user_data, dataset_name, scene_name):
+    """
+    Evaluate camera poses using ICP alignment.
+    Returns per-image errors after ICP alignment.
+    """
+    gt_scene = gt_data[dataset_name][scene_name]
+    user_scene = user_data[dataset_name][scene_name]
     
-    if points1 is None:
-        print("No common points found")
-        return None
+    common_images = set(gt_scene.keys()) & set(user_scene.keys())
     
-    R, t, scale = icp_align(points1, points2, max_iterations=max_iterations)
-    loss = icp_loss(R, t, scale, points1, points2)
+    if len(common_images) < 3:
+        print(f"Not enough common images for {dataset_name}/{scene_name}")
+        return {}
     
-    print(f"Number of matched points: {len(points1)}")
-    print(f"Scale factor: {scale}")
-    print(f"Mean error per point: {np.sqrt(loss / len(points1))}")
+    n = len(common_images)
+    gt_centers = np.zeros((3, n))
+    user_centers = np.zeros((3, n))
     
-    return loss, R, t, scale
+    image_list = list(common_images)
+    for i, img in enumerate(image_list):
+        gt_centers[:, i] = gt_scene[img]['c']
+        user_centers[:, i] = user_scene[img]['c']
+    
+    # MODIFIED: Use ICP instead of Horn for alignment
+    transform, mean_error = icp_alignment(user_centers, gt_centers)
+    
+    errors = {}
+    for i, img in enumerate(image_list):
+        user_center_hom = np.append(user_centers[:, i], 1)
+        transformed_center = (transform @ user_center_hom)[:3]
+        error = np.linalg.norm(transformed_center - gt_centers[:, i])
+        errors[img] = error
+    
+    return errors, transform
+
+
+# MODIFIED: Main evaluation function using ICP
+def compute_icp_metrics(gt_csv, user_csv, output_txt):
+    """
+    Compute evaluation metrics using ICP alignment.
+    """
+    gt_data = read_csv(gt_csv)
+    user_data = read_csv(user_csv)
+    
+    results = []
+    
+    for dataset in gt_data.keys():
+        for scene in gt_data[dataset].keys():
+            if scene not in user_data[dataset]:
+                continue
+            
+            errors, transform = evaluate_with_icp(gt_data, user_data, dataset, scene)
+            
+            if not errors:
+                continue
+            
+            error_values = list(errors.values())
+            mean_error = np.mean(error_values)
+            median_error = np.median(error_values)
+            max_error = np.max(error_values)
+            min_error = np.min(error_values)
+            std_error = np.std(error_values)
+            
+            results.append({
+                'dataset': dataset,
+                'scene': scene,
+                'num_images': len(errors),
+                'mean_error': mean_error,
+                'median_error': median_error,
+                'std_error': std_error,
+                'min_error': min_error,
+                'max_error': max_error
+            })
+            
+            print(f"{dataset}/{scene}:")
+            print(f"  Images: {len(errors)}")
+            print(f"  Mean error: {mean_error:.6f}")
+            print(f"  Median error: {median_error:.6f}")
+            print(f"  Std error: {std_error:.6f}")
+            print(f"  Min/Max: {min_error:.6f} / {max_error:.6f}")
+            print()
+    
+    with open(output_txt, 'w') as f:
+        f.write("ICP-based Camera Pose Evaluation Results\n")
+        f.write("=" * 80 + "\n\n")
+        
+        for result in results:
+            f.write(f"Dataset: {result['dataset']}\n")
+            f.write(f"Scene: {result['scene']}\n")
+            f.write(f"Number of images: {result['num_images']}\n")
+            f.write(f"Mean error: {result['mean_error']:.6f}\n")
+            f.write(f"Median error: {result['median_error']:.6f}\n")
+            f.write(f"Std deviation: {result['std_error']:.6f}\n")
+            f.write(f"Min error: {result['min_error']:.6f}\n")
+            f.write(f"Max error: {result['max_error']:.6f}\n")
+            f.write("-" * 80 + "\n\n")
+        
+        if results:
+            overall_mean = np.mean([r['mean_error'] for r in results])
+            overall_median = np.mean([r['median_error'] for r in results])
+            f.write(f"Overall average mean error: {overall_mean:.6f}\n")
+            f.write(f"Overall average median error: {overall_median:.6f}\n")
+    
+    print(f"Results saved to {output_txt}")
+
+
 if __name__ == "__main__":
-    path_first = "data/reconstruction/0"
-    path_second = "data/reconstruction_first part_colmap/"
-    loss, R, t, scale = compare_colmap_reconstructions_icp(path_first, path_second)
-    print(f"Icp loss mast3r: {loss}")
-
-#if __name__ == "__main__":
-#    path_gt = "data/reconstructions/colmap/reconstruction/"
-#    path_pred_mast3r = "data/reconstructions/mast3r_multi/reconstructions/1/reconstruction/0/"
-#    path_pred_vggt = "data/reconstructions/vggt_multi/reconstructions/1/"
-#    loss, R, t, scale = compare_colmap_reconstructions_icp(path_gt, path_pred_mast3r)
-#    print(f"Icp loss mast3r: {loss}")
-#    loss, R, t, scale = compare_colmap_reconstructions_icp(path_gt, path_pred_vggt)
-#    print(f"Icp loss vggt: {loss}")
-#    loss, R, t, scale = compare_colmap_reconstructions_icp(path_pred_mast3r, path_pred_vggt)
-#    print(f"Icp loss vggt vs mast3r: {loss}")
+    output_dir = Path("evaluate")
+    output_dir.mkdir(exist_ok=True)
+    
+    print("Evaluating MASt3R reconstruction...")
+    compute_icp_metrics(
+        output_dir / "gt_poses_mast3r.csv",
+        output_dir / "user_poses_mast3r.csv",
+        output_dir / "icp_results_mast3r.txt"
+    )
+    
+    print("\nEvaluating VGGT reconstruction...")
+    compute_icp_metrics(
+        output_dir / "gt_poses_vggt.csv",
+        output_dir / "user_poses_vggt.csv",
+        output_dir / "icp_results_vggt.txt"
+    )

@@ -784,4 +784,3 @@ if __name__ == '__main__':
     to_dec=0  # Don't require minimum correct
 )
 
-    print(f"Final score: {sc}%")
