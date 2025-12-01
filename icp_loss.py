@@ -30,7 +30,6 @@ def read_csv(filename, header=True):
     return data
 
 
-# MODIFIED: ICP implementation instead of Horn's method
 def icp_alignment(source_points, target_points, max_iterations=50, tolerance=1e-6):
     """
     Align source points to target points using Iterative Closest Point (ICP).
@@ -83,7 +82,6 @@ def icp_alignment(source_points, target_points, max_iterations=50, tolerance=1e-
     return T, np.sqrt(error)
 
 
-# MODIFIED: Compute alignment and errors using ICP instead of Horn
 def evaluate_with_icp(gt_data, user_data, dataset_name, scene_name):
     """
     Evaluate camera poses using ICP alignment.
@@ -107,7 +105,6 @@ def evaluate_with_icp(gt_data, user_data, dataset_name, scene_name):
         gt_centers[:, i] = gt_scene[img]['c']
         user_centers[:, i] = user_scene[img]['c']
     
-    # MODIFIED: Use ICP instead of Horn for alignment
     transform, mean_error = icp_alignment(user_centers, gt_centers)
     
     errors = {}
@@ -120,7 +117,6 @@ def evaluate_with_icp(gt_data, user_data, dataset_name, scene_name):
     return errors, transform
 
 
-# MODIFIED: Main evaluation function using ICP
 def compute_icp_metrics(gt_csv, user_csv, output_txt):
     """
     Compute evaluation metrics using ICP alignment.

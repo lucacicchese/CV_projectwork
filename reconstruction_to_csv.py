@@ -56,7 +56,7 @@ if __name__ == "__main__":
     output_dir = Path("evaluate")
     output_dir.mkdir(exist_ok=True)
     
-    gt_images_bin = "All_Reconstructions//colmap/reconstruction/images.bin"
+    gt_images_bin = "All_Reconstructions/colmap/reconstruction/images.bin"
     user_images_bin_mast3r = "All_Reconstructions/mast3r/reconstructions/1/reconstruction/0/images.bin"
     user_images_bin_vggt = "All_Reconstructions/vggt/reconstructions/1/images.bin"
 
