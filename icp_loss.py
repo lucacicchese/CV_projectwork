@@ -1,205 +1,119 @@
 import numpy as np
 import csv
 from pathlib import Path
-from scipy.spatial.transform import Rotation
 
 
-def read_csv(filename, header=True):
-    data = {}
-    label_idx = {}    
+def read_csv(filename):
+    """Read camera poses from CSV file."""
+    poses = {}
     
-    with open(filename, newline='\n') as csvfile:    
-        csv_lines = csv.reader(csvfile, delimiter=',')
-        for row in csv_lines:
-            if header:
-                header = False
-                for i, name in enumerate(row): label_idx[name] = i
-                continue
-            dataset = row[label_idx['dataset']]
-            scene = row[label_idx['scene']]
-            image = row[label_idx['image']]
-            R = np.array([float(x) for x in (row[label_idx['rotation_matrix']].split(';'))]).reshape(3,3)
-            t = np.array([float(x) for x in (row[label_idx['translation_vector']].split(';'))]).reshape(3)
-            c = -R.T @ t
-
-            if not (dataset in data):
-                data[dataset] = {}            
-            if not (scene in data[dataset]):
-                data[dataset][scene] = {}
-            data[dataset][scene][image] = {'R': R, 't': t, 'c': c}
-    return data
-
-
-def icp_alignment(source_points, target_points, max_iterations=50, tolerance=1e-6):
-    """
-    Align source points to target points using Iterative Closest Point (ICP).
-    Returns transformation matrix (4x4) and final error.
-    source_points, target_points: shape (3, N)
-    """
-    src = source_points.copy()
-    tgt = target_points.copy()
+    with open(filename, newline='\n') as f:
+        reader = csv.DictReader(f)
+        for row in reader:
+            image = row['image']
+            R = np.array([float(x) for x in row['rotation_matrix'].split(';')]).reshape(3, 3)
+            t = np.array([float(x) for x in row['translation_vector'].split(';')]).reshape(3)
+            c = -R.T @ t  # camera center
+            poses[image] = c
     
-    prev_error = 0
-    R_final = np.eye(3)
-    t_final = np.zeros((3, 1))
+    return poses
+
+
+def icp_alignment(source, target, max_iter=500, tol=1e-6):
+    """Align source points to target points using ICP."""
+    src = source.copy()
+    R_total = np.eye(3)
+    t_total = np.zeros(3)
+    prev_error = float('inf')
     
-    for i in range(max_iterations):
-        distances = np.sum((src[:, :, None] - tgt[:, None, :])**2, axis=0)
+    for _ in range(max_iter):
+        # Find nearest neighbors
+        distances = np.sum((src[:, :, None] - target[:, None, :])**2, axis=0)
         indices = np.argmin(distances, axis=1)
-        matched_tgt = tgt[:, indices]
+        matched = target[:, indices]
         
-        src_mean = src.mean(axis=1, keepdims=True)
-        tgt_mean = matched_tgt.mean(axis=1, keepdims=True)
+        # Compute centroids
+        src_mean = src.mean(axis=1)
+        tgt_mean = matched.mean(axis=1)
         
-        src_centered = src - src_mean
-        tgt_centered = matched_tgt - tgt_mean
+        # Center the points
+        src_centered = src - src_mean[:, None]
+        tgt_centered = matched - tgt_mean[:, None]
         
+        # Compute rotation using SVD
         H = src_centered @ tgt_centered.T
-        U, S, Vt = np.linalg.svd(H)
+        U, _, Vt = np.linalg.svd(H)
         R = Vt.T @ U.T
         
+        # Handle reflection case
         if np.linalg.det(R) < 0:
             Vt[-1, :] *= -1
             R = Vt.T @ U.T
         
+        # Compute translation
         t = tgt_mean - R @ src_mean
         
-        R_final = R @ R_final
-        t_final = R @ t_final + t
+        # Update cumulative transformation
+        R_total = R @ R_total
+        t_total = R @ t_total + t
         
-        src = R @ src + t
+        # Apply transformation
+        src = R @ src + t[:, None]
         
-        error = np.mean(np.sum((src - matched_tgt)**2, axis=0))
-        
-        if abs(prev_error - error) < tolerance:
+        # Check convergence
+        error = np.mean(np.sum((src - matched)**2, axis=0))
+        if abs(prev_error - error) < tol:
             break
         prev_error = error
     
-    T = np.eye(4)
-    T[:3, :3] = R_final
-    T[:3, 3] = t_final.squeeze()
-    
-    return T, np.sqrt(error)
+    return R_total, t_total
 
 
-def evaluate_with_icp(gt_data, user_data, dataset_name, scene_name):
-    """
-    Evaluate camera poses using ICP alignment.
-    Returns per-image errors after ICP alignment.
-    """
-    gt_scene = gt_data[dataset_name][scene_name]
-    user_scene = user_data[dataset_name][scene_name]
+def compute_icp_metrics(gt_csv, user_csv):
+    """Compute ICP alignment error between ground truth and user poses."""
+    gt_poses = read_csv(gt_csv)
+    user_poses = read_csv(user_csv)
     
-    common_images = set(gt_scene.keys()) & set(user_scene.keys())
+    common_images = sorted(set(gt_poses.keys()) & set(user_poses.keys()))
     
     if len(common_images) < 3:
-        print(f"Not enough common images for {dataset_name}/{scene_name}")
-        return {}
+        print(f"Not enough common images: {len(common_images)}")
+        return
     
+ 
     n = len(common_images)
-    gt_centers = np.zeros((3, n))
     user_centers = np.zeros((3, n))
+    gt_centers = np.zeros((3, n))
     
-    image_list = list(common_images)
-    for i, img in enumerate(image_list):
-        gt_centers[:, i] = gt_scene[img]['c']
-        user_centers[:, i] = user_scene[img]['c']
+    for i, img in enumerate(common_images):
+        user_centers[:, i] = user_poses[img]
+        gt_centers[:, i] = gt_poses[img]
     
-    transform, mean_error = icp_alignment(user_centers, gt_centers)
+    R, t = icp_alignment(user_centers, gt_centers)
     
-    errors = {}
-    for i, img in enumerate(image_list):
-        user_center_hom = np.append(user_centers[:, i], 1)
-        transformed_center = (transform @ user_center_hom)[:3]
-        error = np.linalg.norm(transformed_center - gt_centers[:, i])
-        errors[img] = error
+    aligned = R @ user_centers + t[:, None]
+    errors = np.linalg.norm(aligned - gt_centers, axis=0)
     
-    return errors, transform
-
-
-def compute_icp_metrics(gt_csv, user_csv, output_txt):
-    """
-    Compute evaluation metrics using ICP alignment.
-    """
-    gt_data = read_csv(gt_csv)
-    user_data = read_csv(user_csv)
-    
-    results = []
-    
-    for dataset in gt_data.keys():
-        for scene in gt_data[dataset].keys():
-            if scene not in user_data[dataset]:
-                continue
-            
-            errors, transform = evaluate_with_icp(gt_data, user_data, dataset, scene)
-            
-            if not errors:
-                continue
-            
-            error_values = list(errors.values())
-            mean_error = np.mean(error_values)
-            median_error = np.median(error_values)
-            max_error = np.max(error_values)
-            min_error = np.min(error_values)
-            std_error = np.std(error_values)
-            
-            results.append({
-                'dataset': dataset,
-                'scene': scene,
-                'num_images': len(errors),
-                'mean_error': mean_error,
-                'median_error': median_error,
-                'std_error': std_error,
-                'min_error': min_error,
-                'max_error': max_error
-            })
-            
-            print(f"{dataset}/{scene}:")
-            print(f"  Images: {len(errors)}")
-            print(f"  Mean error: {mean_error:.6f}")
-            print(f"  Median error: {median_error:.6f}")
-            print(f"  Std error: {std_error:.6f}")
-            print(f"  Min/Max: {min_error:.6f} / {max_error:.6f}")
-            print()
-    
-    with open(output_txt, 'w') as f:
-        f.write("ICP-based Camera Pose Evaluation Results\n")
-        f.write("=" * 80 + "\n\n")
-        
-        for result in results:
-            f.write(f"Dataset: {result['dataset']}\n")
-            f.write(f"Scene: {result['scene']}\n")
-            f.write(f"Number of images: {result['num_images']}\n")
-            f.write(f"Mean error: {result['mean_error']:.6f}\n")
-            f.write(f"Median error: {result['median_error']:.6f}\n")
-            f.write(f"Std deviation: {result['std_error']:.6f}\n")
-            f.write(f"Min error: {result['min_error']:.6f}\n")
-            f.write(f"Max error: {result['max_error']:.6f}\n")
-            f.write("-" * 80 + "\n\n")
-        
-        if results:
-            overall_mean = np.mean([r['mean_error'] for r in results])
-            overall_median = np.mean([r['median_error'] for r in results])
-            f.write(f"Overall average mean error: {overall_mean:.6f}\n")
-            f.write(f"Overall average median error: {overall_median:.6f}\n")
-    
-    print(f"Results saved to {output_txt}")
+    print(f"Number of images: {n}")
+    print(f"RMS error: {np.sqrt(np.mean(errors**2)):.6f}")
+    print(f"Mean error: {np.mean(errors):.6f}")
+    print(f"Median error: {np.median(errors):.6f}")
+    print(f"Std error: {np.std(errors):.6f}")
+    print(f"Min error: {np.min(errors):.6f}")
+    print(f"Max error: {np.max(errors):.6f}")
 
 
 if __name__ == "__main__":
     output_dir = Path("evaluate")
-    output_dir.mkdir(exist_ok=True)
     
     print("Evaluating MASt3R reconstruction...")
     compute_icp_metrics(
         output_dir / "gt_poses_mast3r.csv",
-        output_dir / "user_poses_mast3r.csv",
-        output_dir / "icp_results_mast3r.txt"
+        output_dir / "user_poses_mast3r.csv"
     )
     
     print("\nEvaluating VGGT reconstruction...")
     compute_icp_metrics(
         output_dir / "gt_poses_vggt.csv",
-        output_dir / "user_poses_vggt.csv",
-        output_dir / "icp_results_vggt.txt"
+        output_dir / "user_poses_vggt.csv"
     )

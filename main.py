@@ -20,11 +20,11 @@ if __name__ == "__main__":
 
     # FLAGS
     multi = False
-    reconstruct = True
+    reconstruct = False
     recon_colmap = True
     recon_mast3r = True
     recon_vggt = True
-    convert = True
+    convert = False
     evaluate = True
 
    
@@ -157,6 +157,8 @@ if __name__ == "__main__":
 
         print("Evaluating models...")
 
+        print("_"*50)
+
         print("Horn: Mast3r vs COLMAP")
         sc = score(
         gt_csv=f"{eval_dir}/gt_poses_mast3r.csv",
@@ -165,6 +167,9 @@ if __name__ == "__main__":
         skip_top_thresholds=0,  
         to_dec=0  
         )
+
+        print("-^"*25)
+
 
         print("Horn: VGGT vs COLMAP")
         sc = score(
@@ -175,6 +180,9 @@ if __name__ == "__main__":
         to_dec=0  
         )
 
+        print("-^"*25)
+
+
         print("Horn: VGGT vs Mast3r")
         sc = score(
         gt_csv=f"{eval_dir}/gt_mast3r_poses_vggt.csv",
@@ -183,26 +191,28 @@ if __name__ == "__main__":
         skip_top_thresholds=0,  
         to_dec=0  
         )
+        print("_"*50)
 
         print("ICP: Mast3r vs COLMAP")
         compute_icp_metrics(
         f"{eval_dir}/gt_poses_mast3r.csv",
-        f"{eval_dir}/user_poses_mast3r.csv",
-        f"{eval_dir}/icp_results_mast3r.txt"
+        f"{eval_dir}/user_poses_mast3r.csv"
         )
+
+        print("-^"*25)
 
         print("ICP: VGGT vs COLMAP")
         compute_icp_metrics(
         f"{eval_dir}/gt_poses_vggt.csv",
-        f"{eval_dir}/user_poses_vggt.csv",
-        f"{eval_dir}/icp_results_vggt.txt"
+        f"{eval_dir}/user_poses_vggt.csv"
         )
+
+        print("-^"*25)
 
         print("ICP: VGGT vs Mast3r")
         compute_icp_metrics(
         f"{eval_dir}/gt_mast3r_poses_vggt.csv",
-        f"{eval_dir}/user_mast3r_poses_vggt.csv",
-        f"{eval_dir}/icp_results_mast3rvggt.txt"
+        f"{eval_dir}/user_mast3r_poses_vggt.csv"
         )
 
         print("Evaluation completed.")
