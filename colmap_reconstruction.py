@@ -3,6 +3,7 @@ import subprocess
 import pycolmap as colmap
 from PIL import Image
 import numpy as np
+from pathlib import Path
 
 
 def colmap_reconstruction(image_folder, database_path):
@@ -34,6 +35,9 @@ def colmap_reconstruction(image_folder, database_path):
     
     # Check if database already has features
     run_feature_extraction = True
+    db_dir = os.path.dirname(database_path)
+    if db_dir:  # if the path has a directory component
+        Path(db_dir).mkdir(parents=True, exist_ok=True)
     if os.path.exists(database_path):
         try:
             db = colmap.Database(database_path)
@@ -55,7 +59,9 @@ def colmap_reconstruction(image_folder, database_path):
         print("Matching features using COLMAP...")
         subprocess.run([
             "colmap", "exhaustive_matcher",
-            "--database_path", database_path
+            "--database_path", database_path,
+            "--SiftMatching.use_gpu", "1",
+            "--SiftMatching.max_num_matches", "32768",
         ], check=True)
     
     print("Running incremental mapping using pycolmap...")

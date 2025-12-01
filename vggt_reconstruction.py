@@ -6,7 +6,6 @@ import numpy as np
 import random
 import warnings
 import shutil
-from utils import split_large_image_folder
 warnings.filterwarnings("ignore", category=FutureWarning)
 
 current_dir = Path(__file__).parent
