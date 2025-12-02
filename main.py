@@ -38,7 +38,7 @@ if __name__ == "__main__":
 
     # FLAGS
     multi = True
-    reconstruct = True
+    reconstruct = False
     recon_colmap = True
     recon_mast3r = True
     recon_vggt = True
@@ -84,7 +84,7 @@ if __name__ == "__main__":
         eval_dir = Path("evaluate")
         eval_dir.mkdir(exist_ok=True)
         if multi == True:
-            colmap_model_path = f"{output_dir}/colmap/reconstruction/"
+            colmap_model_path = f"{output_dir}/colmap/"
             mast3r_model_path = f"{output_dir}/mast3r/final_reconstruction/"
             vggt_model_path = f"{output_dir}/vggt/final_reconstruction/"
         else:
