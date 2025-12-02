@@ -37,13 +37,13 @@ if __name__ == "__main__":
 
 
     # FLAGS
-    multi = False
-    reconstruct = False
+    multi = True
+    reconstruct = True
     recon_colmap = True
     recon_mast3r = True
     recon_vggt = True
     convert = True
-    evaluate = False
+    evaluate = True
 
    
 
@@ -85,17 +85,19 @@ if __name__ == "__main__":
         eval_dir.mkdir(exist_ok=True)
         if multi == True:
             colmap_model_path = f"{output_dir}/colmap/reconstruction/"
-            mast3r_model_path = f"{output_dir}/mast3r/reconstructions/1/reconstruction/0/"
-            vggt_model_path = f"{output_dir}/vggt/reconstructions/1/"
+            mast3r_model_path = f"{output_dir}/mast3r/final_reconstruction/"
+            vggt_model_path = f"{output_dir}/vggt/final_reconstruction/"
         else:
             colmap_model_path = f"{output_dir}/colmap/"
             mast3r_model_path = f"{output_dir}/mast3r/reconstruction/0/"
             vggt_model_path = f"{output_dir}/vggt/"
 
-
+        #Original lines
         gt_reconstruction = pycolmap.Reconstruction(colmap_model_path)
         mast3r_reconstruction = pycolmap.Reconstruction(mast3r_model_path)
         vggt_reconstruction = pycolmap.Reconstruction(vggt_model_path)
+
+
 
         gt = gt_reconstruction.images
         mast3r = mast3r_reconstruction.images
@@ -111,7 +113,7 @@ if __name__ == "__main__":
                             set(img.name for img in vggt.values())
 
         
-        align_colmap_models(colmap_model_path, mast3r_model_path)
+        #align_colmap_models(colmap_model_path, mast3r_model_path)
 
 
 
