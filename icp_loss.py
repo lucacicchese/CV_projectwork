@@ -90,6 +90,11 @@ def compute_icp_metrics(gt_csv, user_csv):
         gt_centers[:, i] = gt_poses[img]
     
     R, t = icp_alignment(user_centers, gt_centers)
+
+    print("Rotation matrix R:")
+    print(R)
+    print("\nTranslation vector t:")
+    print(t)
     
     aligned = R @ user_centers + t[:, None]
     errors = np.linalg.norm(aligned - gt_centers, axis=0)

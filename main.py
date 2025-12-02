@@ -10,6 +10,24 @@ from icp_loss import compute_icp_metrics
 from reconstruction_to_csv import colmap_to_csv, create_thresholds_csv
 import pycolmap
 from pathlib import Path
+import sys
+
+# Set up paths
+current_dir = Path(__file__).parent
+parent_dir = current_dir.parent
+imped_path = parent_dir / "IMPED" / "src"
+
+# Check for IMPED repository
+if not imped_path.exists():
+    print(f"ERROR: IMPED path not found at {imped_path}")
+    print("Make sure the IMPED repository is cloned in the correct location")
+    sys.exit(1)
+
+# Add IMPED to Python path
+sys.path.insert(0, str(imped_path))
+
+# Import the function
+from imped import align_colmap_models
 
 if __name__ == "__main__":
 
@@ -24,8 +42,8 @@ if __name__ == "__main__":
     recon_colmap = True
     recon_mast3r = True
     recon_vggt = True
-    convert = False
-    evaluate = True
+    convert = True
+    evaluate = False
 
    
 
@@ -92,6 +110,10 @@ if __name__ == "__main__":
         common_names_mast3rvggt = set(img.name for img in mast3r.values()) & \
                             set(img.name for img in vggt.values())
 
+        
+        align_colmap_models(colmap_model_path, mast3r_model_path)
+
+
 
         colmap_to_csv(
             f"{colmap_model_path}/images.bin",
@@ -154,6 +176,7 @@ if __name__ == "__main__":
     # Evaluation horn and icp losses
 
     if evaluate == True:
+
 
         print("Evaluating models...")
 
