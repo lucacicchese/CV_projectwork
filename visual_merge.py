@@ -62,17 +62,64 @@ def horn_alignment(src_points, dst_points):
 
 
 def align_reconstructions(recon1, recon2, shared_pairs, alignment_method=horn_alignment):
-    src_points = np.array([recon2.get_camera_center(img2_id) for _, img2_id in shared_pairs])
-    dst_points = np.array([recon1.get_camera_center(img1_id) for img1_id, _ in shared_pairs])
-    
-    scale, R, t = alignment_method(src_points, dst_points)
-    return scale, R, t
+    src = []
+    dst = []
+    for img1_id, img2_id in shared_pairs:
+        C1 = recon1.get_camera_center(img1_id)
+        C2 = recon2.get_camera_center(img2_id)
+        dst.append(C1)
+        src.append(C2)
+    src = np.array(src)
+    dst = np.array(dst)
+    return alignment_method(src, dst)
+
 
 
 def transform_pose(R_cam, t_cam, scale, R_align, t_align):
-    t_cam_transformed = scale * R_align @ t_cam + t_align
-    R_cam_transformed = R_align @ R_cam
-    return R_cam_transformed, t_cam_transformed
+    R_w = R_cam.T
+    t_w = -R_cam.T @ t_cam
+    t_w_new = scale * (R_align @ t_w) + t_align
+    R_w_new = R_align @ R_w
+    R_cam_new = R_w_new.T
+    t_cam_new = -R_cam_new @ t_w_new
+    return R_cam_new, t_cam_new
+
+
+
+def visualize_viewing_directions(recon1, recon2, title, scale2=1.0, R2=None, t2=None):
+    fig = plt.figure(figsize=(12, 10))
+    ax = fig.add_subplot(111, projection='3d')
+
+    for img_id, img in recon1.images.items():
+        center = recon1.get_camera_center(img_id)
+        R_cam = img.cam_from_world.rotation.matrix()
+        direction = R_cam.T @ np.array([0.0, 0.0, 1.0])
+        direction /= np.linalg.norm(direction)
+        ax.quiver(center[0], center[1], center[2],
+                  direction[0], direction[1], direction[2],
+                  length=0.5, arrow_length_ratio=0.3, color='blue')
+
+    for img_id, img in recon2.images.items():
+        center = recon2.get_camera_center(img_id)
+        R_cam = img.cam_from_world.rotation.matrix()
+        direction = R_cam.T @ np.array([0.0, 0.0, 1.0])
+        direction /= np.linalg.norm(direction)
+
+        if R2 is not None:
+            center = scale2 * (R2 @ center) + t2
+            direction = R2 @ direction
+            direction /= np.linalg.norm(direction)
+
+        ax.quiver(center[0], center[1], center[2],
+                  direction[0], direction[1], direction[2],
+                  length=0.5, arrow_length_ratio=0.3, color='red')
+
+    ax.set_xlabel('X')
+    ax.set_ylabel('Y')
+    ax.set_zlabel('Z')
+    ax.set_title(title)
+    plt.tight_layout()
+
 
 
 def transform_point(point, scale, R, t):
@@ -102,37 +149,6 @@ def visualize_cameras(recon1, recon2, title, scale2=1.0, R2=None, t2=None):
     ax.set_title(title)
     plt.tight_layout()
 
-
-def visualize_viewing_directions(recon1, recon2, title, scale2=1.0, R2=None, t2=None):
-    fig = plt.figure(figsize=(12, 10))
-    ax = fig.add_subplot(111, projection='3d')
-    
-    for img_id, img in recon1.images.items():
-        center = recon1.get_camera_center(img_id)
-        R_cam = img.cam_from_world.rotation.matrix()
-        direction = R_cam[:, 2]
-        ax.quiver(center[0], center[1], center[2], 
-                 direction[0], direction[1], direction[2], 
-                 color='blue', length=0.5, arrow_length_ratio=0.3)
-    
-    for img_id, img in recon2.images.items():
-        center = recon2.get_camera_center(img_id)
-        R_cam = img.cam_from_world.rotation.matrix()
-        
-        if R2 is not None:
-            center = transform_point(center, scale2, R2, t2)
-            R_cam = R2 @ R_cam
-        
-        direction = R_cam[:, 2]
-        ax.quiver(center[0], center[1], center[2],
-                 direction[0], direction[1], direction[2],
-                 color='red', length=0.5, arrow_length_ratio=0.3)
-    
-    ax.set_xlabel('X')
-    ax.set_ylabel('Y')
-    ax.set_zlabel('Z')
-    ax.set_title(title)
-    plt.tight_layout()
 
 
 def visualize_point_clouds(recon1, recon2, title, scale2=1.0, R2=None, t2=None):
@@ -258,7 +274,7 @@ def merge_reconstructions(recon1, recon2, shared_pairs, scale, R, t, output_path
     return merged
 
 
-def main(path1, path2, output_path):
+def merge(path1, path2, output_path):
     recon1 = COLMAPReconstruction(path1)
     recon2 = COLMAPReconstruction(path2)
     
@@ -286,8 +302,8 @@ def main(path1, path2, output_path):
 
 
 if __name__ == "__main__":
-    path1 = "data/gerrard-hall/mast3r_multi/"
-    path2 = "data/gerrard-hall/mast3r_multi/reconstructions/3/reconstruction/0"
-    output_path = "data/gerrard-hall/mast3r_multi/"
+    path1 = "data/gerrard-hall/vggt_test/"
+    path2 = "data/gerrard-hall/vggt_test/reconstructions/images_part3"
+    output_path = "data/gerrard-hall/vggt_test/"
     
-    main(path1, path2, output_path)
+    merge(path1, path2, output_path)
