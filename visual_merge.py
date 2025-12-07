@@ -1,9 +1,6 @@
 import numpy as np
 import pycolmap
-from pathlib import Path
 import matplotlib.pyplot as plt
-from mpl_toolkits.mplot3d import Axes3D
-from scipy.spatial.transform import Rotation
 
 
 class COLMAPReconstruction:
@@ -37,7 +34,7 @@ def find_shared_cameras(recon1, recon2):
     return [(names1[name], names2[name]) for name in shared_names]
 
 
-def horn_alignment(src_points, dst_points):
+def horn_alignment_svd(src_points, dst_points):
     src_centroid = src_points.mean(axis=0)
     dst_centroid = dst_points.mean(axis=0)
     
@@ -61,6 +58,38 @@ def horn_alignment(src_points, dst_points):
     return scale, R, t
 
 
+def horn_alignment(src_points, dst_points):
+    src_centroid = src_points.mean(axis=0)
+    dst_centroid = dst_points.mean(axis=0)
+
+    X = src_points - src_centroid
+    Y = dst_points - dst_centroid
+
+    S = X.T @ Y
+    Z = np.array([
+        [ S[0,0] + S[1,1] + S[2,2], S[1,2] - S[2,1],     S[2,0] - S[0,2],     S[0,1] - S[1,0] ],
+        [ S[1,2] - S[2,1],         S[0,0] - S[1,1] - S[2,2], S[0,1] + S[1,0],     S[2,0] + S[0,2] ],
+        [ S[2,0] - S[0,2],         S[0,1] + S[1,0],     -S[0,0] + S[1,1] - S[2,2], S[1,2] + S[2,1] ],
+        [ S[0,1] - S[1,0],         S[2,0] + S[0,2],     S[1,2] + S[2,1],     -S[0,0] - S[1,1] + S[2,2] ]
+    ])
+
+    eigvals, eigvecs = np.linalg.eigh(Z)
+    q = eigvecs[:, np.argmax(eigvals)]
+
+    q0, q1, q2, q3 = q
+    R = np.array([
+        [1 - 2*(q2*q2 + q3*q3),     2*(q1*q2 - q0*q3),     2*(q1*q3 + q0*q2)],
+        [2*(q1*q2 + q0*q3),     1 - 2*(q1*q1 + q3*q3),     2*(q2*q3 - q0*q1)],
+        [2*(q1*q3 - q0*q2),     2*(q2*q3 + q0*q1),     1 - 2*(q1*q1 + q2*q2)]
+    ])
+
+    scale = np.sum(Y * (X @ R.T)) / np.sum(X * X)
+    t = dst_centroid - scale * R @ src_centroid
+
+    return scale, R, t
+
+
+
 def align_reconstructions(recon1, recon2, shared_pairs, alignment_method=horn_alignment):
     src = []
     dst = []
@@ -71,8 +100,12 @@ def align_reconstructions(recon1, recon2, shared_pairs, alignment_method=horn_al
         src.append(C2)
     src = np.array(src)
     dst = np.array(dst)
+    print("Alignment method:", alignment_method.__name__)
     return alignment_method(src, dst)
 
+
+def transform_point(point, scale, R, t):
+    return scale * R @ point + t
 
 
 def transform_pose(R_cam, t_cam, scale, R_align, t_align):
@@ -121,9 +154,6 @@ def visualize_viewing_directions(recon1, recon2, title, scale2=1.0, R2=None, t2=
     plt.tight_layout()
 
 
-
-def transform_point(point, scale, R, t):
-    return scale * R @ point + t
 
 
 def visualize_cameras(recon1, recon2, title, scale2=1.0, R2=None, t2=None):
@@ -179,11 +209,14 @@ def merge_reconstructions(recon1, recon2, shared_pairs, scale, R, t, output_path
     merged = pycolmap.Reconstruction()
     
     shared_img2_ids = {img2_id for _, img2_id in shared_pairs}
-    
+
+    # Copy all cameras from recon1
     for cam_id, cam in recon1.cameras.items():
         merged.add_camera(cam)
     
     next_cam_id = max(recon1.cameras.keys()) + 1
+
+    # Copy cameras from recon2, avoiding duplicates
     cam2_to_merged = {}
     for cam_id, cam in recon2.cameras.items():
         if cam_id not in merged.cameras:
@@ -200,6 +233,7 @@ def merge_reconstructions(recon1, recon2, shared_pairs, scale, R, t, output_path
         else:
             cam2_to_merged[cam_id] = cam_id
     
+    # Copy images from recon1
     img1_to_merged = {}
     for img_id, img in recon1.images.items():
         cam_from_world = pycolmap.Rigid3d(
@@ -221,6 +255,8 @@ def merge_reconstructions(recon1, recon2, shared_pairs, scale, R, t, output_path
         img1_to_merged[img_id] = img.image_id
     
     next_img_id = max(recon1.images.keys()) + 1
+
+    # Copy images from recon2, transforming poses
     img2_to_merged = {}
     
     for img_id, img in recon2.images.items():
@@ -249,7 +285,9 @@ def merge_reconstructions(recon1, recon2, shared_pairs, scale, R, t, output_path
         merged.register_image(next_img_id)
         img2_to_merged[img_id] = next_img_id
         next_img_id += 1
-    
+
+
+    # Copy and transform 3D points
     for pt_id, pt in recon1.points3D.items():
         new_track = pycolmap.Track()
         for elem in pt.track.elements:
@@ -258,7 +296,8 @@ def merge_reconstructions(recon1, recon2, shared_pairs, scale, R, t, output_path
         
         if len(new_track.elements) > 0:
             merged.add_point3D(pt.xyz, new_track, pt.color)
-    
+        
+    # Copy and transform 3D points from recon2
     for pt_id, pt in recon2.points3D.items():
         xyz_new = transform_point(pt.xyz, scale, R, t)
         
@@ -302,8 +341,8 @@ def merge(path1, path2, output_path):
 
 
 if __name__ == "__main__":
-    path1 = "data/gerrard-hall/vggt_test/"
-    path2 = "data/gerrard-hall/vggt_test/reconstructions/images_part3"
-    output_path = "data/gerrard-hall/vggt_test/"
+    path1 = "All_Reconstructions/mast3r/reconstructions/1/reconstruction/0"
+    path2 = "All_Reconstructions/mast3r/reconstructions/2/reconstruction/0"
+    output_path = "All_Reconstructions/mast3r/test/"
     
     merge(path1, path2, output_path)

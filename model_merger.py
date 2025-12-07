@@ -19,19 +19,18 @@ def merge_all_colmap_models(root_folder: str, final_output_dir: str = None, tmp_
             and (p / "points3D.bin").exists()
         )
 
-    # --- ORIGINAL STRUCTURE: root_folder/**/reconstruction/0 ---
+    
     model_dirs: List[Path] = [
         p for p in root.glob("**/reconstruction/0") if is_valid_model_dir(p)
     ]
 
-    # --- NEW FALLBACK STRUCTURE: root_folder/{number}/ ---
-    # Detect folders that contain bin files directly
+    
     fallback_dirs = [
         p for p in root.iterdir()
         if p.is_dir() and is_valid_model_dir(p)
     ]
 
-    # Avoid duplicates (in case reconstruction/0 was inside one of these)
+    # Avoid duplicates
     for f in fallback_dirs:
         if f not in model_dirs:
             model_dirs.append(f)

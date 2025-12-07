@@ -15,7 +15,9 @@ def multi_stage_reconstruction(dataset_folder, output_folder, model_name):
     splits_dir = f"{output_folder}/splits"
     split_dataset(
         input_folder=dataset_folder,
-        out_folder=splits_dir
+        out_folder=splits_dir,
+        split_size=40,
+        min_overlap=10,
     )
 
     # Step 2: RUN RECONSTRUCTION
@@ -67,9 +69,9 @@ def multi_stage_reconstruction(dataset_folder, output_folder, model_name):
         final_output_dir=f"{output_folder}/final_reconstruction")
 
 if __name__ == "__main__":
-    model_name = "mast3r"  # or "vggt"
-    dataset_folder = "data/gerrard-hall/images/"
-    output_folder = f"data/gerrard-hall/{model_name}_multi"
+    model_name = "vggt"  # or "vggt"
+    dataset_folder = "data/santissima/images/"
+    output_folder = f"data/santissima/{model_name}_multi"
 
     
     multi_stage_reconstruction(dataset_folder, output_folder, model_name)

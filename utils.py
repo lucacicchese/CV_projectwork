@@ -12,13 +12,6 @@ def split_dataset(
     min_overlap=10,
     seed=None
 ):
-    """
-    Split dataset with:
-    - Fully random order
-    - Randomly selected overlap images
-    - Each overlapping image appears in ALL subsequent splits
-    - No sequential bias
-    """
     if seed is not None:
         random.seed(seed)
 
@@ -49,20 +42,19 @@ def split_dataset(
     shuffled = image_files.copy()
     random.shuffle(shuffled)
 
-    # This will hold images that must appear in current + all future splits
     persistent_overlap = set()
     splits = []
-    used_images = set()  # track which images have been introduced as "new"
+    used_images = set()  
     idx = 0
 
     split_idx = 1
     while idx < total_images or persistent_overlap:
         current_split = set()
 
-        # 1. Always include persistent overlap images
+        # Always include persistent overlap images
         current_split.update(persistent_overlap)
 
-        # 2. Add new unique images until we reach split_size
+        # Add new unique images until we reach split_size
         needed = split_size - len(current_split)
         new_images = []
 
@@ -75,7 +67,6 @@ def split_dataset(
 
         current_split.update(new_images)
 
-        # If still short (end of data), allow reusing non-overlap images
         if len(current_split) < split_size and idx >= total_images:
             remaining = [f for f in shuffled if f.name not in {p.name for p in persistent_overlap}]
             random.shuffle(remaining)
@@ -85,14 +76,11 @@ def split_dataset(
                 if img.name not in {p.name for p in current_split}:
                     current_split.add(img)
 
-        # Convert to list for consistent handling
         current_list = list(current_split)
-        random.shuffle(current_list)  # randomize order inside split
+        random.shuffle(current_list)  
 
-        # 3. Randomly select min_overlap images from current split to carry forward
         candidates_for_overlap = [img for img in current_list if img.name not in {p.name for p in persistent_overlap}]
         if len(candidates_for_overlap) < min_overlap:
-            # Fall back to any if not enough new ones
             candidates_for_overlap = current_list
 
         random.shuffle(candidates_for_overlap)
@@ -106,11 +94,9 @@ def split_dataset(
 
         split_idx += 1
 
-        # Stop when we've used all images and overlap stabilizes
         if idx >= total_images and len(persistent_overlap) <= min_overlap:
             break
 
-    # === Copy files to folders ===
     for i, split_images in enumerate(splits, 1):
         split_folder = output_root / f"{i}"
         print(f"Creatingg split folder: {split_folder}")
@@ -122,7 +108,6 @@ def split_dataset(
     print(f"\nRandom overlapping split complete!")
     print(f"Created {len(splits)} splits in: {output_root}")
 
-    # === Overlap analysis ===
     print("\nOverlap between consecutive splits:")
     for i in range(len(splits) - 1):
         set1 = {p.name for p in splits[i]}
@@ -133,7 +118,6 @@ def split_dataset(
     return output_root
 
 
-# === FIXED USAGE EXAMPLE ===
 if __name__ == "__main__":
     split_dataset(
         input_folder="data/gerrard-hall/images/",
