@@ -23,7 +23,7 @@ if __name__ == "__main__":
     output_dir = "All_Reconstructions"
     dataset_name = "gerrard-hall"
     dataset_folder = f"data/{dataset_name}/images/"
-
+    
 
     # FLAGS
     multi = True
